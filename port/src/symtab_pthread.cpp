@@ -214,26 +214,31 @@ static void delay_late_thread(void)
 {
     const char *env = getenv("DEADSPACE_LATE_THREAD_MS");
     /*
-     * Off by default now, and the measurement that changed it is worth keeping.
+     * On by default, and the sample size is the whole story here.
      *
-     * When this was added the run faulted in two different places on identical
-     * runs, and delaying every engine thread by 1500 ms made it land in one
-     * place reliably - the race was real. It is no longer: with the ABI fixes
-     * that followed (va_arg promotion, the ldrd alignment trap, and the
-     * dispatch-arity mismatch, all in the JNI machinery), 0 ms and 5000 ms per
-     * thread now produce a byte-identical fault at +0x30a744.
+     * This was added when the run faulted in two different places on identical
+     * runs - +0x30a744 and +0x5f384 - and delaying every engine thread made it
+     * land in one place, which is what made the fault chaseable at all.
      *
-     * So the race was almost certainly never the engine's. It was ours: garbage
-     * arguments reaching JNI methods, which is exactly the kind of corruption
-     * whose timing depends on which thread got there first. Keeping a nine
-     * second startup delay to hide a bug that no longer exists would be
-     * shipping a workaround for someone else's fixed problem.
+     * It was then removed, on the evidence of two runs at 0 ms and two at
+     * 5000 ms that all faulted identically. That was wrong: two runs cannot
+     * distinguish "deterministic" from "usually lands here". Six runs each say:
      *
-     * Left reachable rather than deleted, because the Vita port needed it and
-     * this build is the same: if a non-deterministic fault ever returns, set
-     * DEADSPACE_LATE_THREAD_MS and find out in one run whether it is a race.
+     *     no delay      5 x +0x30a744, 1 x +0x5f384
+     *     1500 ms       6 x +0x30a744
+     *
+     * The race is still there. It is just rare enough that a small sample looks
+     * clean, which is the trap this variable exists to survive - and the reason
+     * the removal commit's claim of a byte-identical fault should be read as
+     * what it was, a conclusion drawn from four data points.
+     *
+     * Still a workaround, and still not shippable at this cost: 1500 ms times
+     * six threads is nine seconds of startup. What it buys is a reproducible
+     * fault, which is worth more right now than a fast one. Narrowing it to the
+     * single thread that matters is what DEADSPACE_LATE_THREAD_AT is for, and 0
+     * turns it off to re-measure.
      */
-    int ms = env ? atoi(env) : 0;
+    int ms = env ? atoi(env) : 1500;
     if (ms <= 0)
         return;
 

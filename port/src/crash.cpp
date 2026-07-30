@@ -17,6 +17,7 @@
  */
 #include "crash.h"
 
+#include <fcntl.h>
 #include <signal.h>
 #include <stdint.h>
 #include <string.h>
@@ -179,6 +180,48 @@ static void put_stack(uintptr_t sp)
         put("         (none - the fault is not below any module frame)\n");
 }
 
+/*
+ * A file descriptor on /dev/null, opened once at init, used to ask the kernel
+ * whether an address is readable.
+ *
+ * write() validates its buffer and returns EFAULT rather than delivering a
+ * signal, which is the one way to probe memory from inside a signal handler
+ * without risking a second fault. Everything else - reading it directly,
+ * installing a temporary handler, msync - either faults or is not
+ * async-signal-safe.
+ */
+static int g_null_fd = -1;
+
+static bool readable(const void *p, size_t len)
+{
+    if (g_null_fd < 0 || !p)
+        return false;
+    return write(g_null_fd, p, len) == (ssize_t)len;
+}
+
+/*
+ * Four words at a pointer, when the pointer is readable.
+ *
+ * The registers alone say where a fault happened; they do not say what the
+ * program thought it had. This port spent hours on a fault whose whole
+ * explanation was "the std::vector at r12 has begin == 0" - three words that
+ * were sitting in memory the entire time and that no report ever printed.
+ */
+static void put_words(const char *name, uintptr_t v)
+{
+    if (!readable((const void *)v, 16))
+        return;
+
+    const uintptr_t *w = (const uintptr_t *)v;
+    put("       [");
+    put(name);
+    put("] = ");
+    for (int i = 0; i < 4; i++) {
+        put_hex(w[i]);
+        put(i == 3 ? "\n" : " ");
+    }
+}
+
 static void on_fault(int sig, siginfo_t *si, void *ucontext)
 {
     const ucontext_t *uc = (const ucontext_t *)ucontext;
@@ -234,6 +277,15 @@ static void on_fault(int sig, siginfo_t *si, void *ucontext)
         put_reg("r1", m->arm_r1);
         put_reg("r2", m->arm_r2);
         put_reg("r3", m->arm_r3);
+        put_reg("ip", m->arm_ip);
+
+        /* What the registers point at, which is usually the actual answer. */
+        put_words("r0", m->arm_r0);
+        put_words("r1", m->arm_r1);
+        put_words("r2", m->arm_r2);
+        put_words("r3", m->arm_r3);
+        put_words("ip", m->arm_ip);
+        put_words("sp", m->arm_sp);
     }
 
     put("       module text at ");
@@ -259,6 +311,9 @@ extern "C" void crash_report_init(so_module *mod, const char *soname)
     }
     if (soname)
         g_soname = soname;
+
+    /* O_WRONLY so a probe never actually consumes anything. */
+    g_null_fd = open("/dev/null", O_WRONLY);
 
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
