@@ -17,6 +17,39 @@ struct Object;
 struct ArrayObject;
 struct String;
 
+/*
+ * The type va_arg has to be asked for, given the type the method declares.
+ *
+ * C's default argument promotions apply to everything passed through `...`:
+ * anything narrower than int arrives as an int, and a float arrives as a
+ * double. Asking va_arg for the narrow type is undefined behaviour, and gcc
+ * does not merely warn about it - it stops generating code and emits an
+ * undefined instruction in place of the function body.
+ *
+ * That failure is invisible until the call happens, and then it is a SIGILL at
+ * an address inside this loader with the game's return address in lr, which
+ * reads like memory corruption rather than a compile-time mistake. The three
+ * functions it first appeared in were two bytes apart in the disassembly -
+ * bodies of `udf #255` - which is the tell, because real functions cannot be.
+ *
+ * jboolean is unsigned char, so every JNI method taking a "(Z)" argument hit
+ * this. None existed in the inherited classes, which is why the machinery
+ * shipped this way; com/ea/blast's sensor delegates are full of them.
+ */
+template <typename T>
+struct va_promoted { using type = T; };
+
+template <> struct va_promoted<bool>           { using type = int; };
+template <> struct va_promoted<char>           { using type = int; };
+template <> struct va_promoted<signed char>    { using type = int; };
+template <> struct va_promoted<unsigned char>  { using type = int; };
+template <> struct va_promoted<short>          { using type = int; };
+template <> struct va_promoted<unsigned short> { using type = int; };
+template <> struct va_promoted<float>          { using type = double; };
+
+template <typename T>
+using va_promoted_t = typename va_promoted<T>::type;
+
 // Automatic generator for function dispatch
 template <auto F, class... Prelude>
 struct dispatch
@@ -49,12 +82,22 @@ struct dispatch
         };
         
         public:
+        /*
+         * Read each argument at its promoted width, then narrow back to what
+         * the method declared. Promotion is the identity for int, pointers and
+         * the 64-bit types, so this only changes behaviour where it was
+         * previously undefined - see va_promoted above.
+         *
+         * dispatch_a below deliberately does NOT promote: it reads from a
+         * jvalue array, where every member is already stored at its exact
+         * declared width.
+         */
         static R dispatch_v(Prelude... pre_args, va_list va)
         {
             if constexpr (std::is_same_v<R, void>) {
-                BraceCallVoid{pre_args..., (Args)va_arg(va, Args)...};
+                BraceCallVoid{pre_args..., (Args)va_arg(va, va_promoted_t<Args>)...};
             } else {
-                return BraceCall{pre_args..., (Args)va_arg(va, Args)...}.ret;
+                return BraceCall{pre_args..., (Args)va_arg(va, va_promoted_t<Args>)...}.ret;
             }
         }
 

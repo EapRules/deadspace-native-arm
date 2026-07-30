@@ -272,7 +272,18 @@ ABI_ATTR static jboolean iface_IsInstanceOf(JNIEnv *env, jobject jobj, jclass jc
 static ManagedMethod *GetMethodIDGeneric(const char *func, JNIEnv *env, Class *clz, const char* name, const char* sig)
 {
     if (clz == NULL) {
-        fatal_error("%s: NULL class dereference, returning NULL (was looking for '%s').\n", func, name);
+        /*
+         * Print the signature, not just the name.
+         *
+         * Method lookup below is an exact strcmp on both, so a fake class
+         * written with a plausible-looking signature simply never matches and
+         * the engine gets NULL exactly as if the class were still missing -
+         * with no new evidence in the log to say which of the two it was.
+         * Echoing the descriptor the game asked for turns writing the next
+         * class from guesswork into transcription.
+         */
+        fatal_error("%s: NULL class dereference, returning NULL "
+                    "(was looking for '%s%s').\n", func, name, sig ? sig : "");
         return NULL;
     }
 
