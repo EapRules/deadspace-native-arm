@@ -104,6 +104,35 @@ extern "C" int __cxa_guard_acquire(void *guard);
 extern "C" void __cxa_guard_release(void *guard);
 
 /*
+ * Wrapped, not bound directly, so the reasoning above can be checked rather
+ * than believed.
+ *
+ * The claim is that the host's EABI guard convention and the game's inline
+ * `ldr / ands #1` test agree. If they did not, the failure would be silent and
+ * indistinguishable from what this port was already chasing: a getter for a
+ * function-local static returning an object whose constructor never ran, i.e.
+ * exactly "an object with a null vtable". Counting acquires against releases
+ * settles it - every acquire that returns non-zero must be followed by a
+ * release, and any guard that gets acquired twice was never marked done.
+ */
+extern "C" int bionic_cxa_guard_acquire(void *guard)
+{
+    int rc = __cxa_guard_acquire(guard);
+    if (getenv("DEADSPACE_TRACE_GUARDS"))
+        trace("cxa_guard_acquire(%p) -> %d  [word=0x%08x]",
+              guard, rc, *(unsigned *)guard);
+    return rc;
+}
+
+extern "C" void bionic_cxa_guard_release(void *guard)
+{
+    __cxa_guard_release(guard);
+    if (getenv("DEADSPACE_TRACE_GUARDS"))
+        trace("cxa_guard_release(%p)     [word=0x%08x]",
+              guard, *(unsigned *)guard);
+}
+
+/*
  * __cxa_pure_virtual is ours on purpose, not the host's.
  *
  * It appears ~5000 times in the run log because it is a vtable filler, one
@@ -261,12 +290,12 @@ DynLibFunction symtable_bionic[] = {
     /* No float crosses any of these boundaries, so select_either() resolves
      * every one to a direct pointer and no ABI bridge is generated. */
     THUNK_SPECIFIC("__atomic_cmpxchg", bionic_atomic_cmpxchg),
+    THUNK_SPECIFIC("__cxa_guard_acquire", bionic_cxa_guard_acquire),
+    THUNK_SPECIFIC("__cxa_guard_release", bionic_cxa_guard_release),
     THUNK_SPECIFIC("__atomic_swap",    bionic_atomic_swap),
     THUNK_SPECIFIC("__atomic_inc",     bionic_atomic_inc),
     THUNK_SPECIFIC("__atomic_dec",     bionic_atomic_dec),
 
-    NO_THUNK("__cxa_guard_acquire", (uintptr_t)&__cxa_guard_acquire),
-    NO_THUNK("__cxa_guard_release", (uintptr_t)&__cxa_guard_release),
     NO_THUNK("__cxa_pure_virtual",  (uintptr_t)&bionic_cxa_pure_virtual),
 
     /* Data, not code: the loader writes these addresses into the relocation
