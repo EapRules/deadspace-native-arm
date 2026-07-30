@@ -206,6 +206,18 @@ struct ManagedMethod {
     const void *addr_variadic; // For <...> and <va_list> 
     const void *addr_array; // For arrays
     const bool is_static_method;
+    /*
+     * Whether the dispatcher expects a jclass between the object and the
+     * va_list. RegisterNonVirtual builds one that does; Register does not.
+     *
+     * This has to be recorded rather than inferred, because both kinds are
+     * reachable through the same JNI entry points. CallIntMethod goes to
+     * iface_CallMethodV, which knows only the method id - and calling a
+     * four-argument dispatcher with three arguments does not fail, it reads one
+     * register too far and uses whatever is there as the va_list. See the
+     * comment on AudioTrack.write(short[]) for what that looks like.
+     */
+    const bool takes_class = false;
 
     template <auto *F>
     static const ManagedMethod Register(Class &clazz, const char *name, const char *signature)
@@ -265,6 +277,7 @@ struct ManagedMethod {
             .addr_variadic = (void*)disp::vargs,
             .addr_array = (void*)disp::aargs,
             .is_static_method = false,
+            .takes_class = true,
         };
     }
 };

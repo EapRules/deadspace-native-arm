@@ -585,6 +585,28 @@ ABI_ATTR static T iface_CallMethod(JNIEnv *env, jobject obj, jmethodID meth, ...
 
     va_list va;
     va_start(va, meth);
+    /*
+     * Two dispatcher shapes reach here and only the method knows which it is.
+     * RegisterNonVirtual builds (env, obj, jclass, va_list); Register builds
+     * (env, obj, va_list). Calling the four-argument one with three arguments
+     * reads a register that was never set and uses it as the va_list, which
+     * surfaces as garbage arguments and a fault deep inside the method - see
+     * AudioTrack.write(short[]).
+     */
+    if (method->takes_class) {
+        T (*dispatch4)(JNIEnv *, jobject, jclass, va_list) =
+            (decltype(dispatch4))method->addr_variadic;
+        if constexpr (std::is_same_v<T, void>) {
+            dispatch4(env, obj, (jclass)method->clazz, va);
+            va_end(va);
+            return;
+        } else {
+            T ret = dispatch4(env, obj, (jclass)method->clazz, va);
+            va_end(va);
+            return ret;
+        }
+    }
+
     T (*dispatch)(JNIEnv *, jobject, va_list) = (decltype(dispatch))method->addr_variadic;
     if constexpr (std::is_same_v<T, void>) {
         dispatch(env, obj, va);
@@ -610,6 +632,18 @@ ABI_ATTR static T iface_CallMethodV(JNIEnv *env, jobject obj, jmethodID meth, va
 #ifdef WANTS_TRACE
     printf("TRACE JNI: %s...\n", method->name);
 #endif
+
+    /* Same two shapes as iface_CallMethod above; see the comment there. */
+    if (method->takes_class) {
+        T (*dispatch4)(JNIEnv *, jobject, jclass, va_list) =
+            (decltype(dispatch4))method->addr_variadic;
+        if constexpr (std::is_same_v<T, void>) {
+            dispatch4(env, obj, (jclass)method->clazz, va);
+            return;
+        } else {
+            return dispatch4(env, obj, (jclass)method->clazz, va);
+        }
+    }
 
     T (*dispatch)(JNIEnv *, jobject, va_list) = (decltype(dispatch))method->addr_variadic;
     if constexpr (std::is_same_v<T, void>) {
