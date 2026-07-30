@@ -56,6 +56,16 @@ extern so_module *deadspace_module(void);
 
 extern "C" {
 
+/* bionic's armeabi timespec: two 32-bit words. The host's is two 64-bit ones.
+ * Declared here rather than shared with symtab_sem.cpp so each file stays
+ * readable on its own; the layout is fixed by the game's ABI, not by us. */
+static pthread_mutex_t g_mutex_bootstrap = PTHREAD_MUTEX_INITIALIZER;
+
+struct bionic_timespec {
+    int32_t tv_sec;
+    int32_t tv_nsec;
+};
+
 struct bionic_pthread_attr {
     uint32_t flags;
     void    *stack_base;
@@ -411,7 +421,6 @@ static const uintptr_t kBionicInitWordMax = 0xffff;
  * init call to hang the allocation off, so the first lock is where it has to
  * happen - and two threads can arrive there at once.
  */
-static pthread_mutex_t g_mutex_bootstrap = PTHREAD_MUTEX_INITIALIZER;
 
 static pthread_mutex_t *host_mutex(BIONIC_pthread_mutex_t *m)
 {
@@ -616,6 +625,76 @@ int bionic_pthread_attr_setschedparam(struct bionic_pthread_attr *attr,
 }
 
 
+
+/*
+ * pthread_cond_timedwait, because the game's struct timespec is eight bytes and
+ * this host's is sixteen.
+ *
+ * Debian trixie's armhf is built with _TIME_BITS=64, so the host's time_t is
+ * 64-bit and its timespec is {int64 tv_sec; int64 tv_nsec}. bionic's armeabi is
+ * {int32; int32}. This is the same disagreement src/symtab_time.cpp fixed for
+ * clock_gettime and nanosleep and src/symtab_sem.cpp fixed for sem_timedwait -
+ * and this one call was left behind, forwarding the pointer untouched.
+ *
+ * The disassembly shows the caller reading only two words:
+ *
+ *     24bf18  ldr r5, [r2, #4]    ; tv_nsec
+ *     24bf1c  ldr lr, [ip, #3740] ; the "no timeout" sentinel
+ *     24bf40  bl  pthread_cond_timedwait@plt
+ *
+ * so glibc composes tv_sec from the game's {tv_sec, tv_nsec} pair and reads
+ * tv_nsec from eight bytes of the caller's frame that were never written. The
+ * deadline lands either far in the future - the waiting thread never wakes - or
+ * in the past, or glibc rejects it with EINVAL and the caller, which only
+ * distinguishes ETIMEDOUT from "error", spins. All three are a hung or spinning
+ * subsystem with nothing in the log, which is the failure mode this port has
+ * been chasing on a worker thread.
+ *
+ * EA::Thread::Condition::Wait is the only call site.
+ */
+int bionic_pthread_cond_timedwait(pthread_cond_t **cnd, BIONIC_pthread_mutex_t *m,
+                                  const struct bionic_timespec *abs)
+{
+    pthread_mutex_t *host = host_mutex(m);
+    if (!cnd || !host || !abs)
+        return EINVAL;
+
+    /*
+     * Lazily created, and serialised - which the bridge's version is not.
+     *
+     * The engine never calls pthread_cond_init: readelf lists it as UND with no
+     * relocation at all, and EA::Thread::Condition's constructor simply zeroes
+     * two words. So every condvar in this game is created on first use, and a
+     * condvar is by definition touched from more than one thread - the waiter
+     * and the signaller are never the same. Two of them arriving at a zero word
+     * together each allocate one, and one of the two is then referenced by
+     * nobody: a lost wakeup, a thread parked forever, no crash and nothing in
+     * the log.
+     *
+     * Same reasoning and same lock as host_mutex() below, which took
+     * g_mutex_bootstrap for exactly this case and whose comment does not
+     * mention that condvars have it worse.
+     */
+    if (!*cnd) {
+        pthread_mutex_lock(&g_mutex_bootstrap);
+        if (!*cnd) {                       /* re-read under the lock */
+            pthread_cond_t *c = (pthread_cond_t *)calloc(1, sizeof(pthread_cond_t));
+            if (!c) {
+                pthread_mutex_unlock(&g_mutex_bootstrap);
+                return ENOMEM;
+            }
+            pthread_cond_init(c, NULL);
+            __atomic_store_n(cnd, c, __ATOMIC_RELEASE);
+        }
+        pthread_mutex_unlock(&g_mutex_bootstrap);
+    }
+
+    struct timespec ts;
+    ts.tv_sec  = (time_t)abs->tv_sec;
+    ts.tv_nsec = (long)abs->tv_nsec;
+    return pthread_cond_timedwait(*cnd, host, &ts);
+}
+
 DynLibFunction symtable_pthread[] = {
     THUNK_SPECIFIC("pthread_attr_init",           bionic_pthread_attr_init),
     THUNK_SPECIFIC("pthread_attr_destroy",        bionic_pthread_attr_destroy),
@@ -631,6 +710,7 @@ DynLibFunction symtable_pthread[] = {
     THUNK_SPECIFIC("pthread_mutex_lock",          bionic_pthread_mutex_lock),
     THUNK_SPECIFIC("pthread_mutex_unlock",        bionic_pthread_mutex_unlock),
     THUNK_SPECIFIC("pthread_mutex_trylock",       bionic_pthread_mutex_trylock),
+    THUNK_SPECIFIC("pthread_cond_timedwait",      bionic_pthread_cond_timedwait),
     THUNK_SPECIFIC("pthread_mutexattr_setpshared", bionic_pthread_mutexattr_setpshared),
     THUNK_SPECIFIC("pthread_attr_setstack",       bionic_pthread_attr_setstack),
     THUNK_SPECIFIC("pthread_attr_setschedparam",  bionic_pthread_attr_setschedparam),
