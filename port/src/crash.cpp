@@ -18,6 +18,7 @@
 #include "crash.h"
 
 #include <fcntl.h>
+#include <sys/syscall.h>
 #include <signal.h>
 #include <stdint.h>
 #include <string.h>
@@ -262,7 +263,16 @@ static void on_fault(int sig, siginfo_t *si, void *ucontext)
         return;
     }
 
-    put("\nFATAL: ");
+    /*
+     * Which thread. This engine runs six of them and the fault is on a worker,
+     * not on the frame path - a fact that took three sessions to establish
+     * because nothing in the report distinguished them. syscall(SYS_gettid) is
+     * async-signal-safe; pthread_self is not, and gettid() the glibc wrapper
+     * did not exist before 2.30.
+     */
+    put("\nFATAL: [tid ");
+    put_hex((uintptr_t)syscall(SYS_gettid));
+    put("] ");
     put(signal_name(sig));
     put(" at ");
     put_hex((uintptr_t)(si ? si->si_addr : 0));

@@ -255,6 +255,46 @@ static void delay_late_thread(void)
     nanosleep(&ts, NULL);
 }
 
+/*
+ * Name the thread that was just created, by the same id the crash handler
+ * prints.
+ *
+ * The entry-point trace above says which function a thread runs; it does not
+ * say which of the six running threads faulted. Matching a crash to its entry
+ * point is the difference between "a worker thread dies" and "the thread that
+ * runs +0x24c914 dies", and only one of those can be acted on.
+ *
+ * The tid is read from the child's own descriptor rather than passed in,
+ * because there is no portable way to ask for it before the thread starts.
+ * pthread_getattr_np would give the stack, not the id; this uses the pthread_t
+ * as the key instead, which the crash handler cannot see - so both are printed
+ * and the stack bounds tie them together.
+ */
+static void report_thread(int rc, pthread_t *thread, void *(*entry)(void *))
+{
+    if (rc != 0 || !thread)
+        return;
+
+    so_module *mod = deadspace_module();
+    unsigned   off = 0;
+    if (mod && (uintptr_t)entry >= mod->text_base &&
+        (uintptr_t)entry <  mod->text_base + mod->text_size)
+        off = (unsigned)((uintptr_t)entry - mod->text_base);
+
+    void  *stack = NULL;
+    size_t size  = 0;
+    pthread_attr_t a;
+    if (pthread_getattr_np(*thread, &a) == 0) {
+        pthread_attr_getstack(&a, &stack, &size);
+        pthread_attr_destroy(&a);
+    }
+
+    trace("  ^ pthread_t=%p stack=%p..%p",
+          (void *)*thread, stack, (char *)stack + size);
+    (void)off;
+}
+
+
 int bionic_pthread_create(pthread_t *thread, const struct bionic_pthread_attr *attr,
                           void *(*entry)(void *), void *arg)
 {
@@ -275,8 +315,11 @@ int bionic_pthread_create(pthread_t *thread, const struct bionic_pthread_attr *a
     if (is_late_thread(entry))
         delay_late_thread();
 
-    if (!attr)
-        return pthread_create(thread, NULL, entry, arg);
+    if (!attr) {
+        int rc0 = pthread_create(thread, NULL, entry, arg);
+        report_thread(rc0, thread, entry);
+        return rc0;
+    }
 
     pthread_attr_t host;
     if (pthread_attr_init(&host) != 0)
@@ -292,6 +335,7 @@ int bionic_pthread_create(pthread_t *thread, const struct bionic_pthread_attr *a
 
     int rc = pthread_create(thread, &host, entry, arg);
     pthread_attr_destroy(&host);
+    report_thread(rc, thread, entry);
     return rc;
 }
 
@@ -330,9 +374,20 @@ int bionic_pthread_create(pthread_t *thread, const struct bionic_pthread_attr *a
  * The word is therefore decoded here instead, and this table comes before the
  * generated libc one in so_dynamic_libraries, so these win the lookup.
  *
- * Only the four entry points libdeadspace.so actually imports are overridden;
- * pthread_mutex_trylock and friends are left to the bridge because the game
- * never calls them and an unused override is an untested one.
+ * The claim that used to close this comment - that only four entry points are
+ * imported and "pthread_mutex_trylock and friends are left to the bridge
+ * because the game never calls them" - was wrong, and wrong in the expensive
+ * direction. The game imports trylock and calls it three times, twice inside
+ * EAThread's Mutex on the same object it locks two instructions earlier.
+ * Bound straight to glibc, it reads our heap pointer as __lock, __kind from a
+ * live field of the game's object, and on success writes __owner and __nusers
+ * over twenty bytes the game owns.
+ *
+ * The lesson is not about trylock. "The game never calls it" is a claim about
+ * the binary and belongs in a readelf output, not in a comment - and the same
+ * sentence was covering pthread_mutexattr_setpshared, pthread_attr_setstack
+ * and pthread_attr_setschedparam, all three imported, all three called from
+ * the thread-creation path that every worker in the engine goes through.
  */
 
 /* bionic/pthread.h: the mutex type lives in bits 14-15 of the value word. */
@@ -482,6 +537,85 @@ int bionic_pthread_mutex_unlock(BIONIC_pthread_mutex_t *m)
 
 } /* extern "C" */
 
+/* ------------------------------------------------------------------ *
+ * The four calls the comment above wrongly assumed nobody made.
+ *
+ * Each one operates on an object this loader keeps in a layout the host does
+ * not share, and each was bound straight to glibc. None of them crash where
+ * they are called - they corrupt an object that faults later, somewhere else,
+ * which is why they survived this long. The Vita port wraps all four
+ * (vita-ref/loader/reimpl/pthr.c) against this same library.
+ * ------------------------------------------------------------------ */
+
+/*
+ * trylock has to follow the same indirection lock/unlock do: the game's word
+ * holds a pointer to the host mutex, and host_mutex() decodes bionic's static
+ * initialisers on the way. Three call sites, two of them on the same object
+ * that pthread_mutex_lock takes twelve instructions later.
+ */
+int bionic_pthread_mutex_trylock(BIONIC_pthread_mutex_t *m)
+{
+    pthread_mutex_t *host = host_mutex(m);
+    if (!host)
+        return EINVAL;
+    return pthread_mutex_trylock(host);
+}
+
+/*
+ * setpshared, likewise. glibc implements it as a read-modify-write that sets
+ * bit 31 of the word it is given, and under this bridge that word is a heap
+ * pointer - so a PROCESS_SHARED request turns 0x000b1020 into 0x800b1020 and
+ * the next pthread_mutex_init dereferences it. The engine asks for
+ * PROCESS_SHARED on one of its two branches.
+ */
+int bionic_pthread_mutexattr_setpshared(pthread_mutexattr_t **attr_ptr, int pshared)
+{
+    if (!attr_ptr || !*attr_ptr)
+        return EINVAL;
+    return pthread_mutexattr_setpshared(*attr_ptr, pshared);
+}
+
+/*
+ * setstack and setschedparam write through glibc's pthread_attr layout into an
+ * object this file deliberately keeps in bionic's. The offsets overlap without
+ * overflowing, so nothing faults - the fields simply land on the wrong ones:
+ *
+ *   setschedparam writes the priority at offset 0, which is bionic's `flags`,
+ *   erasing the DETACHED bit that pthread_attr_setdetachstate set two calls
+ *   earlier. Every thread the engine starts then leaks its descriptor and its
+ *   stack, because nothing ever joins them.
+ *
+ *   setstack writes stackaddr and stacksize at 16 and 20, which are bionic's
+ *   sched_policy and sched_priority, while the size the engine asked for never
+ *   reaches `stack_size` at offset 8 - so bionic_pthread_create below compares
+ *   against the host default, loses, and the thread runs on a stack the engine
+ *   did not choose while the buffer it allocated is simply abandoned.
+ *
+ * Both are in EA::Thread::Thread::Begin, between setdetachstate and
+ * pthread_create. Every worker goes through them.
+ */
+int bionic_pthread_attr_setstack(struct bionic_pthread_attr *attr,
+                                 void *stack_base, uint32_t stack_size)
+{
+    if (!attr || !stack_base || stack_size < 16384)
+        return EINVAL;
+    attr->stack_base = stack_base;
+    attr->stack_size = stack_size;
+    return 0;
+}
+
+int bionic_pthread_attr_setschedparam(struct bionic_pthread_attr *attr,
+                                      const int *param)
+{
+    if (!attr || !param)
+        return EINVAL;
+    /* bionic's sched_param is a single int, and so is the host's on ARM; only
+     * where it lands differs. */
+    attr->sched_priority = *param;
+    return 0;
+}
+
+
 DynLibFunction symtable_pthread[] = {
     THUNK_SPECIFIC("pthread_attr_init",           bionic_pthread_attr_init),
     THUNK_SPECIFIC("pthread_attr_destroy",        bionic_pthread_attr_destroy),
@@ -496,6 +630,10 @@ DynLibFunction symtable_pthread[] = {
     THUNK_SPECIFIC("pthread_mutex_destroy",       bionic_pthread_mutex_destroy),
     THUNK_SPECIFIC("pthread_mutex_lock",          bionic_pthread_mutex_lock),
     THUNK_SPECIFIC("pthread_mutex_unlock",        bionic_pthread_mutex_unlock),
+    THUNK_SPECIFIC("pthread_mutex_trylock",       bionic_pthread_mutex_trylock),
+    THUNK_SPECIFIC("pthread_mutexattr_setpshared", bionic_pthread_mutexattr_setpshared),
+    THUNK_SPECIFIC("pthread_attr_setstack",       bionic_pthread_attr_setstack),
+    THUNK_SPECIFIC("pthread_attr_setschedparam",  bionic_pthread_attr_setschedparam),
 
     { NULL, 0 },
 };
