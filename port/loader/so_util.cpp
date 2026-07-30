@@ -1,0 +1,894 @@
+/* so_util.c -- utils to load and hook .so modules
+ *
+ * Copyright (C) 2021 Andy Nguyen
+ * 
+ * This software may be modified and distributed under the terms
+ * of the GPLv3 license. See the LICENSE.md file for details.
+ */
+
+// JohnnyonFlame:
+// This is a severely rewritten/reworked version of the so_util.c library built by @TheOfficialFloW
+// for the gtasa_vita project.
+// Notable changes:
+// - Ported from PS-Vita to Linux.
+// - Supports both ARMHF and AARCH64 targets
+// - Supports many more relocation segments - e.g. DT_ANDROID_REL_OFFSET
+//   - Can now load multiple android system libraries for better compatibility, e.g. libm, libc++, etc.
+// - Single-word hooks using trampoline code generation for longer jump targets
+//   - Allows for safely hooking functions that have been stubbed by compile targets, such as enabling debugging output messages.
+// - PLT0 stub hook for easier debugging when the application crashes with a missing import
+
+#define __USE_MISC
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <errno.h>
+#include <sys/stat.h>       
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <string.h>
+#include <stdint.h>
+#include <leb128.h>
+#include <signal.h>
+#include <errno.h>
+#include <signal.h>
+#include <string>
+#include <filesystem>
+#include <type_traits>
+#include <functional>
+#include <vector>
+#include <fstream>
+#include <algorithm>  /* std::find - relied on a transitive include upstream */
+
+#include "platform.h"
+#include "io_util.h"
+#include "so_util.h"
+
+namespace fs = std::filesystem;
+
+#if defined(__aarch64__)
+#include "arm64_encodings.h"
+#elif defined(__arm__)
+#include "arm32_encodings.h"
+#endif
+
+char *so_dump_dir = NULL;
+char *so_alt_searchpath = NULL;
+
+#define PATCH_SZ 0x10000 //64 KB-ish arenas
+std::vector<so_module *> loaded_modules;
+
+// rela_functor functions should return 1 to stop, or 0 to continue executing,
+// and will receive the module and relocation data from the relocation iterator
+using rela_functor = std::function<int(so_module *mod, const Elf_Rela *rel)>;
+
+void foreach_rela(so_module *mod, rela_functor functor);
+void so_relocate_all(so_module *mod);
+extern "C" void jni_resolve_native(so_module *so);
+
+static void so_flush_caches(so_module *mod, int write) {
+  // clear cache and set EXEC on all executable regions
+	__builtin___clear_cache((void*)mod->patch_base, (void*)(mod->cave_head));
+	mprotect((void*)mod->patch_base, mod->cave_head - mod->patch_base, PROT_EXEC|(write ? PROT_WRITE|PROT_READ : PROT_READ));
+}
+
+/*
+ * alloc_arena: allocates space on either patch or cave arenas, 
+ * range: maximum range from allocation to dst (ignored if NULL)
+ * dst: destination address
+*/
+uintptr_t so_alloc_arena(so_module *so, uintptr_t range, uintptr_t dst, size_t sz)
+{
+  // Is address in range?
+  #define inrange(lsr, gtr, range) \
+    (((uintptr_t)(range) == (uintptr_t)NULL) || ((uintptr_t)(range) >= ((uintptr_t)(gtr) - (uintptr_t)(lsr))))
+  // Space left on block
+  #define blkavail(type) (so->type##_size - (so->type##_head - so->type##_base))
+  
+  // keep allocations 4-byte aligned for simplicity
+  sz = ALIGN_MEM(sz, 4);
+
+  if (sz <= (blkavail(patch)) && inrange(so->patch_base, dst, range)) {
+    so->patch_head += sz;
+    return (so->patch_head - sz);
+  } else if (sz <= (blkavail(cave)) && inrange(dst, so->cave_base, range)) {
+    so->cave_head += sz;
+    return (so->cave_head - sz);
+  }
+
+  return (uintptr_t)NULL;
+}
+
+#pragma GCC push_options
+#pragma GCC optimize ("O0")
+void gdb_push(const char *name, uintptr_t load_addr)
+{ 
+  // This is used by the debug.gdb script
+  // Optimizations are forced OFF so this isn't stripped away
+}
+#pragma GCC pop_options
+
+static fs::path get_arch_path()
+{
+#if defined(__aarch64__)
+    return "arm64-v8a";
+#elif defined(__arm__)
+    return "armeabi-v7a";
+#else
+    #error Unknown arch, implement me.
+#endif
+}
+
+static so_module *so_load(void *so_data, uintptr_t load_addr, size_t sz) {
+  // Basic elf header pointer
+  so_module *mod = (so_module *)calloc(1, sizeof(so_module));
+
+  mod->ehdr = (Elf_Ehdr *)so_data;
+  mod->phdr = (Elf_Phdr *)((uintptr_t)so_data + mod->ehdr->e_phoff);
+  mod->shdr = (Elf_Shdr *)((uintptr_t)so_data + mod->ehdr->e_shoff);
+  mod->shstr = (char *)((uintptr_t)so_data + mod->shdr[mod->ehdr->e_shstrndx].sh_offset);
+
+  uintptr_t cave_base = 0;
+  uintptr_t cave_end = 0;
+
+  // Calculate the necessary memory mapped area for the entire elf
+  size_t max_vaddr = 0;
+  size_t min_vaddr = ~0;
+  for (int i = 0; i < mod->ehdr->e_phnum; i++) {
+    if (mod->phdr[i].p_type == PT_LOAD) {
+      size_t seg_end = ALIGN_MEM(mod->phdr[i].p_vaddr + mod->phdr[i].p_memsz, mod->phdr[i].p_align);
+      if (seg_end > max_vaddr)
+        max_vaddr = seg_end;
+      if (mod->phdr[i].p_vaddr < min_vaddr)
+        min_vaddr = mod->phdr[i].p_vaddr;
+    }
+  }
+
+  // Total area = load + patch arena
+  size_t load_sz = max_vaddr - min_vaddr;
+  size_t load_total_sz = load_sz + PATCH_SZ;
+
+  // Now memory map the requested size
+  void *shd = MAP_FAILED;
+  int flags = MAP_PRIVATE|MAP_ANONYMOUS|MAP_POPULATE;
+
+  if (load_addr) {
+    flags |= MAP_FIXED;
+    shd = mmap((void*)(load_addr - PATCH_SZ), load_total_sz, PROT_READ|PROT_WRITE, flags, 0, 0);
+  } else {
+    shd = mmap(0, load_total_sz, PROT_READ|PROT_WRITE, flags, 0, 0);
+  }
+
+  if (load_addr == 0)
+    load_addr = (uintptr_t)shd + PATCH_SZ;
+
+  if (shd == MAP_FAILED)
+    goto so_load_err;
+
+  // Allocate arena for code patches, trampolines, etc
+  // Ideally right under .text
+  mod->patch_size = PATCH_SZ;
+  mod->patch_base = mod->patch_head = ALIGN_MEM(load_addr - PATCH_SZ, 0x4);
+  mod->base = load_addr;
+
+  memset(shd, 0, load_total_sz);
+  for (int i = 0; i < mod->ehdr->e_phnum; i++) {
+    if (mod->phdr[i].p_type == PT_LOAD) {
+      size_t prog_size = mod->phdr[i].p_memsz;
+      mod->phdr[i].p_vaddr += load_addr - min_vaddr;
+
+      if ((mod->phdr[i].p_flags & PF_X) == PF_X) {
+        mod->text_base = mod->phdr[i].p_vaddr;
+        mod->text_size = prog_size;
+      } else {
+        if (mod->n_data >= MAX_DATA_SEG) { 
+          goto so_load_err;
+        }
+
+        mod->data_base[mod->n_data] = mod->phdr[i].p_vaddr;
+        mod->data_size[mod->n_data] = mod->phdr[i].p_memsz;
+        mod->n_data++;
+      }
+
+      // Copy the requested segment from the shared library to the allocated region
+      memcpy((void*)mod->phdr[i].p_vaddr, (void *)((uintptr_t)so_data + mod->phdr[i].p_offset), mod->phdr[i].p_filesz);
+    }
+  }
+
+  // Remember where the unwind table landed, while the headers are still alive.
+  // Only PT_LOAD entries were rebased above, so this one still carries its
+  // link-time address and the same load_addr - min_vaddr shift applies.
+  for (int i = 0; i < mod->ehdr->e_phnum; i++) {
+    if (mod->phdr[i].p_type == PT_ARM_EXIDX) {
+      mod->arm_exidx = load_addr + mod->phdr[i].p_vaddr - min_vaddr;
+      mod->arm_exidx_size = mod->phdr[i].p_memsz;
+      break;
+    }
+  }
+
+  // Start by setting the cave to go from ".text" to the end of the mapped
+  // virtual memory region
+  cave_base = mod->text_base + mod->text_size;
+  cave_end = load_addr + load_sz;
+
+  // Shrink the cave until it fits between the executable segment and the next
+  // loaded segment. 
+  for (int i = 0; i < mod->ehdr->e_phnum; i++) {
+    if (mod->phdr[i].p_type != PT_LOAD)
+      continue;
+
+    if (mod->phdr[i].p_vaddr > cave_base && mod->phdr[i].p_vaddr < cave_end)
+      cave_end = mod->phdr[i].p_vaddr;
+  }
+  
+  mod->cave_base = mod->cave_head = cave_base;
+  mod->cave_size = cave_end - cave_base;
+
+  // Gather some information from the headers for posteriority
+  // TODO:: Maybe rework into using DT_*?
+  for (int i = 0; i < mod->ehdr->e_shnum; i++) {
+    char *sh_name = mod->shstr + mod->shdr[i].sh_name;
+    uintptr_t sh_addr = load_addr + mod->shdr[i].sh_addr;
+    size_t sh_size = mod->shdr[i].sh_size;
+    if (strcmp(sh_name, ".dynamic") == 0) {
+      mod->dynamic = (Elf_Dyn *)sh_addr;
+      mod->num_dynamic = sh_size / sizeof(Elf_Dyn);
+    } else if (strcmp(sh_name, ".dynstr") == 0) {
+      mod->dynstr = (char *)sh_addr;
+    } else if (strcmp(sh_name, ".dynsym") == 0) {
+      mod->dynsym = (Elf_Sym *)sh_addr;
+      mod->num_dynsym = sh_size / sizeof(Elf_Sym);
+    } else if (strcmp(sh_name, ".rel.dyn") == 0) {
+      if (mod->shdr[i].sh_type == SHT_ANDROID_REL) {
+        mod->droidreldyn = (uint8_t *)sh_addr;
+        mod->num_droidreldyn = sh_size;
+      } else {
+        mod->reldyn = (Elf_Rel *)sh_addr;
+        mod->num_reldyn = sh_size / sizeof(Elf_Rel);
+      }
+    } else if (strcmp(sh_name, ".rel.plt") == 0) {
+      mod->relplt = (Elf_Rel *)sh_addr;
+      mod->num_relplt = sh_size / sizeof(Elf_Rel);
+    } else if (strcmp(sh_name, ".rela.dyn") == 0) {
+      if (mod->shdr[i].sh_type == SHT_ANDROID_RELA) {
+        mod->droidreladyn = (uint8_t *)sh_addr;
+        mod->num_droidreladyn = sh_size;
+      } else {
+        mod->reladyn = (Elf_Rela *)sh_addr;
+        mod->num_reladyn = sh_size / sizeof(Elf_Rela);
+      }
+    } else if (strcmp(sh_name, ".rela.plt") == 0) {
+      mod->relaplt = (Elf_Rela *)sh_addr;
+      mod->num_relaplt = sh_size / sizeof(Elf_Rela);
+    } else if (strcmp(sh_name, ".init_array") == 0) {
+      mod->init_array = (init_array_t*)sh_addr;
+      mod->num_init_array = sh_size / sizeof(void *);
+    } else if (strcmp(sh_name, ".hash") == 0) {
+      mod->hash = (uint32_t *)sh_addr;
+    }
+  }
+
+  for (int i = 0; i < mod->num_dynamic; i++) {
+    switch (mod->dynamic[i].d_tag) {
+      case DT_RELR:
+      case DT_ANDROID_RELR:
+        mod->relr = (Elf_Relr*)((uintptr_t)mod->base + mod->dynamic[i].d_un.d_val);
+        break;
+      case DT_ANDROID_RELRSZ:
+      case DT_RELRSZ:
+        mod->num_relr = mod->dynamic[i].d_un.d_val / sizeof(Elf_Relr);
+        break;
+      case DT_SONAME:
+        mod->soname = mod->dynstr + mod->dynamic[i].d_un.d_ptr;
+        break;
+      default:
+        break;
+    }
+  }
+
+  if (so_dump_dir && *so_dump_dir && fs::exists(so_dump_dir) && fs::is_directory(so_dump_dir)) {
+    uint64_t hash = fnv1a_64((const char *)so_data, sz);
+    std::stringstream filename;
+    filename << std::hex << std::setw(16) << std::setfill('0') << hash << ".so";
+
+    fs::path path = fs::path(so_dump_dir) / filename.str();
+    if (!fs::exists(path)) {
+      std::ofstream out(path, std::ios::binary);
+      if (out)
+        out.write((const char *)so_data, sz);
+    }
+
+    if (fs::exists(path)) {
+      gdb_push(path.c_str(), (uintptr_t)load_addr);
+    } else {
+      fatal_error("Failed to write so: '%s'.\n", filename.str().c_str());
+    }
+  }
+
+  return mod;
+
+so_load_err:
+  if (mod)
+    free(mod);
+  if (shd != MAP_FAILED)
+    munmap(shd, load_total_sz);
+
+  return NULL;
+}
+
+static uintptr_t get_static_load_addr(std::string filename)
+{
+#ifndef NDEBUG
+    if (filename.starts_with("libm.so"))
+      return 0x10000000;
+    if (filename.starts_with("libcompiler_rt.so"))
+      return 0x14000000;
+    if (filename.starts_with("libstdc++.so") || filename.starts_with("libc++.so") || filename.starts_with("libc++_shared.so"))
+      return 0x18000000;
+    if (filename.starts_with("libopenal.so"))
+      return 0x1C000000;
+    if (filename.starts_with("libyoyo.so"))
+      return 0x40000000;
+#endif
+
+    return 0x0;
+}
+
+// Diverges from gmloader-next: the list of libraries the loader answers itself
+// is supplied by the port (so_builtin_libs) rather than hardcoded here, because
+// which ones are emulated and which are mapped out of the APK is a per-game
+// decision.
+static bool has_builtin_lib(std::string filename)
+{
+    for (int i = 0; so_builtin_libs[i] != NULL; i++) {
+      if (filename.starts_with(so_builtin_libs[i]))
+        return true;
+    }
+    return false;
+}
+
+void so_set_options(const char *dump_dir, const char *alt_searchpath)
+{
+  if (so_dump_dir) {
+    free(so_dump_dir);
+    so_dump_dir = NULL;
+  }
+
+  if (so_alt_searchpath) {
+    free(so_alt_searchpath);
+    so_alt_searchpath = NULL;
+  }
+
+  if (dump_dir)
+    so_dump_dir = strdup(dump_dir);
+
+  if (alt_searchpath)
+    so_alt_searchpath = strdup(alt_searchpath);
+}
+
+so_module *so_load_module(const char *filename, struct zip *apk, void *vm) {
+    std::vector<std::string> modules;
+    modules.emplace_back(filename);
+    so_module *ret = NULL;
+
+    for (int i = 0; i < modules.size(); i++) {
+      std::string current = modules[i];
+
+      // If provided by the loader, then we skip it
+      if (has_builtin_lib(current))
+        continue;
+
+      warning("Loading '%s'...\n", current.c_str());
+
+      char filepath[PATH_MAX];
+      void *buffer = NULL;
+      size_t image_size = 0;
+
+      if (so_alt_searchpath && *so_alt_searchpath) {
+          snprintf(filepath, PATH_MAX, "%s/%s/%s", so_alt_searchpath, get_arch_path().c_str(), current.c_str());
+          if (io_load_file(filepath, &buffer, &image_size))
+              goto load_module_success;
+      }
+
+      snprintf(filepath, PATH_MAX, "lib/%s/%s", get_arch_path().c_str(), current.c_str());
+      if (io_load_file(filepath, &buffer, &image_size))
+          goto load_module_success;
+
+      if (zip_load_file(apk, filepath, &image_size, &buffer, 0))
+        goto load_module_success;
+      
+      fatal_error("Failed to load module '%s'.\n", current.c_str());
+      return NULL;
+
+load_module_success:
+      uintptr_t base_addr = get_static_load_addr(current);
+      so_module *mod = so_load(buffer, base_addr, image_size);
+      free(buffer);
+
+      if (!mod) {
+        fatal_error("Failed to load module '%s'.\n", current.c_str());
+        return NULL;
+      }
+
+      if (!ret)
+        ret = mod;
+      
+      loaded_modules.push_back(mod);
+
+      std::string needed;
+      // Add the dependencies
+      for (int j = 0; j < mod->num_dynamic; j++) {
+        switch (mod->dynamic[j].d_tag) {
+          case DT_NEEDED:
+            needed = std::string(mod->dynstr + mod->dynamic[j].d_un.d_val);
+            if (std::find(modules.begin(), modules.end(), needed) == modules.end()) {
+              modules.push_back(needed);
+            }
+            break;
+          default:
+            break;
+        }
+      }
+    }
+
+    // Relocations, house keeping, etc.
+    for (auto it = loaded_modules.rbegin(); it != loaded_modules.rend(); it++) {
+      so_module *mod = *it;
+      if (mod->was_init)
+        continue;
+
+      printf("Linking %s...\n", mod->soname);
+      so_relocate_all(mod);
+      so_static_overrides(mod);
+      so_flush_caches(mod, 1);
+      so_initialize(mod);
+      jni_resolve_native(mod);
+
+      // And call the JNI_OnLoad method if present
+      auto JNI_OnLoad = (int32_t (*)(void *vm, void *reserved))so_symbol(mod, "JNI_OnLoad");
+      if (JNI_OnLoad != NULL)
+          JNI_OnLoad(vm, NULL);
+
+      mod->was_init = 1;
+    }
+
+    printf("Loaded %s...\n", ret->soname);
+    return ret;
+}
+
+void reloc_err(uintptr_t got0)
+{
+  // Find to which module this missing symbol belongs
+  int found = 0;
+  so_module *mod = NULL;
+  for (so_module *it: loaded_modules) {
+    if ((got0 >= it->text_base) && (got0 <= it->text_base + it->text_size)) {
+      found = 1;
+    }
+    else {
+      for (int i = 0; i < it->n_data; i++) {
+        if ((got0 >= it->data_base[i]) && (got0 <= it->data_base[i] + it->data_size[i])) {
+          found = 1;
+          break;
+        }
+      }
+    }
+
+    if (found) {
+      mod = it;
+      break;
+    }
+  }
+
+  if (mod) {
+    const char *sym_name = NULL;
+
+    // Attempt to find symbol name and then display error
+    foreach_rela(mod, [&](so_module *mod, const Elf_Rela *rel) -> int {
+      Elf_Sym *sym = &mod->dynsym[ELF_R_SYM(rel->r_info)];
+      uintptr_t *ptr = (uintptr_t *)(mod->base + rel->r_offset);
+      if (got0 == (uintptr_t)ptr) {
+        sym_name = mod->dynstr + sym->st_name;
+        return 1;
+      }
+
+      return 0;
+    });
+
+    if (sym_name) {
+      fatal_error("Unknown symbol \"%s\" (%p).\n", sym_name, (void*)got0);
+      exit(-1);
+    }
+  }
+
+  // Ooops, this shouldn't have happened.
+  fatal_error("Unknown symbol \"???\" (%p).\n", (void*)got0);
+  exit(-1);
+}
+
+void plt0_stub()
+{
+#if defined(__aarch64__)
+    register uintptr_t got0 asm("x16");
+    reloc_err(got0);
+#elif defined(__arm__)
+    register uintptr_t got0 asm("r12");
+    reloc_err(got0);
+#else
+    #error Implement me
+#endif
+}
+
+template <typename Rel>
+int helper_foreach_rel(so_module *mod, Rel *rels, int rel_cnt, rela_functor functor)
+{
+  for (int i = 0; i < rel_cnt; i++) {
+    Elf_Rela rela = {};
+    rela.r_offset = rels[i].r_offset;
+    rela.r_info = rels[i].r_info;
+    if constexpr (std::is_same_v<decltype(rels), Elf_Rela*>)
+      rela.r_addend = rels[i].r_addend;
+
+    if (functor(mod, &rela))
+      return 1;
+  }
+
+  return 0;
+}
+
+template <typename Rel>
+void so_relocate_rel(so_module *mod, const Rel *rel) {
+  Elf_Sym *sym = &mod->dynsym[ELF_R_SYM(rel->r_info)];
+  uintptr_t *ptr = (uintptr_t *)(mod->base + rel->r_offset);
+
+  Elf_Sword addend = 0;
+  if constexpr (std::is_same_v<Elf_Rela, Rel>)
+    addend = rel->r_addend; 
+
+  int type = ELF_R_TYPE(rel->r_info);
+  switch (type) {
+    case R_AARCH64_RELATIVE:
+      *ptr = mod->base + addend;
+      break;
+
+    case R_ARM_RELATIVE:
+      *ptr += mod->base;
+      break;
+
+    case R_AARCH64_ABS64:
+    case R_AARCH64_GLOB_DAT:
+    case R_AARCH64_JUMP_SLOT:
+    case R_ARM_ABS32:
+    case R_ARM_GLOB_DAT:
+    case R_ARM_JUMP_SLOT:
+    {
+      if (sym->st_shndx != SHN_UNDEF) {
+        if (type == R_ARM_ABS32)
+          *ptr += mod->base + sym->st_value;
+        else
+          *ptr = mod->base + sym->st_value + addend;
+      }
+      else {
+        uintptr_t link = so_resolve_link(mod, mod->dynstr + sym->st_name);
+
+        if (link) {
+          if (type == R_ARM_ABS32 || type == R_AARCH64_ABS64)
+            *ptr += link;
+          else
+            *ptr = link;
+        } else {
+          if (type == R_ARM_JUMP_SLOT || type == R_AARCH64_JUMP_SLOT)
+            *ptr = (uintptr_t)&plt0_stub;
+          warning("Missing: %s (%p, %p)\n", mod->dynstr + sym->st_name, ptr, (void*)*ptr);
+        }
+      }
+      break;
+    }
+
+    default:
+      fatal_error("Error unknown relocation type %d\n", type);
+      break;
+  }
+}
+
+// invert logic a bit
+static inline int64_t consume_sleb128(uint8_t* &cursor, uint8_t *last)
+{
+  int64_t dec = 0;
+  int next = read_sleb128_to_int64(cursor, last, &dec);
+  cursor += next;
+  return dec;
+}
+
+int helper_foreach_droid_rel(so_module *mod, uint8_t *rel, size_t bytes, rela_functor functor)
+{
+  Elf_Rela reloc;
+  uint8_t *cursor = rel;
+  uint8_t *last = rel + bytes;
+
+  // Bionic: tools/relocation_packer/README.TXT
+  if (strncmp((char *)cursor, "APA1", 4) == 0) {
+    cursor += 4;
+    int64_t pairs = 0, addr = 0, addend = 0;
+    pairs = consume_sleb128(cursor, last);
+    while(pairs) {
+      addr += consume_sleb128(cursor, last);
+      addend += consume_sleb128(cursor, last);
+
+      // This is the unpacked relocation - pass it to the generic function
+      reloc = (Elf_Rela){(Elf_Addr)addr, R_ARM_RELATIVE, addend};
+      if (functor(mod, &reloc))
+        return 1;
+      pairs--;
+    }
+  } else if (strncmp((char *)cursor, "APR1", 4) == 0) {
+    cursor += 4;
+    int64_t pairs = 0, addr = 0, count = 0, delta = 0;
+    pairs = consume_sleb128(cursor, last);
+    addr = consume_sleb128(cursor, last);
+
+    // This is the unpacked relocation - pass it to the generic function
+    reloc = (Elf_Rela){(Elf_Addr)addr, R_ARM_RELATIVE, 0};
+    if (functor(mod, &reloc))
+      return 1;
+
+    while(pairs) {
+      count = consume_sleb128(cursor, last);
+      delta = consume_sleb128(cursor, last);
+      while (count) {
+        addr += delta;
+
+        // This is the unpacked relocation - pass it to the generic function
+        reloc = (Elf_Rela){(Elf_Addr)addr, R_ARM_RELATIVE, 0};
+        if (functor(mod, &reloc))
+          return 1;
+        count--;
+      }
+
+      pairs--;
+    }
+  } else if (strncmp((char *)cursor, "APS2", 4) == 0) {
+    cursor += 4;
+    int64_t groupFlagsAddend = 0, info = 0, count = 0, groupSize = 0, offset = 0, addend = 0, groupFlags = 0, groupOffsetDelta = 0;
+    count = consume_sleb128(cursor, last);
+    offset += consume_sleb128(cursor, last);
+
+    while (count) {
+      if (groupSize <= 0) {
+        groupOffsetDelta = 0;
+        groupSize = consume_sleb128(cursor, last);
+        groupFlags = consume_sleb128(cursor, last);
+
+        if (groupFlags & RELOCATION_GROUPED_BY_OFFSET_DELTA_FLAG)
+          groupOffsetDelta = consume_sleb128(cursor, last);
+        if (groupFlags & RELOCATION_GROUPED_BY_INFO_FLAG)
+          info = consume_sleb128(cursor, last);
+
+        groupFlagsAddend = groupFlags & (RELOCATION_GROUP_HAS_ADDEND_FLAG | RELOCATION_GROUPED_BY_ADDEND_FLAG);
+        if (groupFlagsAddend == RELOCATION_GROUP_HAS_ADDEND_FLAG) {
+          /* */
+        } else if (groupFlagsAddend == (RELOCATION_GROUP_HAS_ADDEND_FLAG | RELOCATION_GROUPED_BY_ADDEND_FLAG)) {
+          addend += consume_sleb128(cursor, last);
+        } else {
+          addend = 0;
+        }
+      }
+      
+      if (groupFlags & RELOCATION_GROUPED_BY_OFFSET_DELTA_FLAG) {
+        offset += groupOffsetDelta;
+      } else {
+        offset += consume_sleb128(cursor, last);
+      }
+      if ((groupFlags & RELOCATION_GROUPED_BY_INFO_FLAG) == 0)
+        info = consume_sleb128(cursor, last);
+
+      if (groupFlagsAddend == RELOCATION_GROUP_HAS_ADDEND_FLAG) {
+        addend += consume_sleb128(cursor, last);
+      }
+
+      // This is the unpacked relocation - pass it to the generic function
+      reloc = (Elf_Rela){(Elf_Addr)offset, (Elf_Addr)info, addend};
+      if (functor(mod, &reloc))
+        return 1;
+
+      count--;
+      groupSize--;
+    }
+  }
+
+  return 0;
+}
+
+void foreach_rela(so_module *mod, rela_functor functor)
+{
+  if (mod->droidreldyn && helper_foreach_droid_rel(mod, mod->droidreldyn, mod->num_droidreldyn, functor)) return;
+  if (mod->droidreladyn && helper_foreach_droid_rel(mod, mod->droidreladyn, mod->num_droidreladyn, functor)) return;
+  if (mod->num_reladyn > 0 && helper_foreach_rel(mod, mod->reladyn, mod->num_reladyn, functor)) return;
+  if (mod->num_relaplt > 0 && helper_foreach_rel(mod, mod->relaplt, mod->num_relaplt, functor)) return;
+  if (mod->num_reldyn > 0 && helper_foreach_rel(mod, mod->reldyn, mod->num_reldyn, functor)) return;
+  if (mod->num_relplt > 0 && helper_foreach_rel(mod, mod->relplt, mod->num_relplt, functor)) return;
+}
+
+void so_relr_relocate(so_module *mod)
+{
+  // Not really all that useful to have a foreach for this when you don't really
+  // have info you can extract from relr, right?
+  Elf_Addr *where = (Elf_Addr *)mod->base;
+  Elf_Relr *relr = (Elf_Relr *)mod->relr;
+  Elf_Relr *relrlim = &relr[mod->num_relr];
+  for (; relr < relrlim; relr++) {
+    Elf_Relr entry = *relr;
+    
+    if ((entry & 1) == 0) {
+      where = (Elf_Addr *)(mod->base + entry);
+      *where++ += (Elf_Addr)mod->base;
+    } else {
+      for (Elf_Word i = 0; (entry >>= 1) != 0; i++)
+        if ((entry & 1) != 0)
+          where[i] += (Elf_Addr)mod->base;
+      where += 8 * sizeof(Elf_Relr) - 1;
+    }
+  }
+}
+
+void so_relocate_all(so_module *mod)
+{
+  so_relr_relocate(mod);
+  foreach_rela(mod, [](so_module *mod, const Elf_Rela *rel) -> int {
+    so_relocate_rel(mod, rel);
+    return 0;
+  });
+}
+
+uintptr_t so_resolve_link(so_module *mod, const char *symbol) {
+  // Look through the provided host functionality first
+  for (int i = 0; so_dynamic_libraries[i] != NULL; i++) {
+    DynLibFunction *funcs = so_dynamic_libraries[i];
+    for (int j = 0; funcs[j].symbol != NULL; j++) {
+      if (strcmp(symbol, funcs[j].symbol) == 0) {
+        return funcs[j].func;
+      }
+    }
+  }
+
+  // oh, look for it on the guest so files I guess
+  for (so_module *it: loaded_modules) {
+    if (it != mod) {
+      uintptr_t link = so_symbol(it, symbol);
+      if (link)
+        return link;
+    }
+  }
+
+  return 0;
+}
+
+int so_static_overrides(so_module *mod) {
+  // Will look for symbols inside the modules which are included in one of the
+  // static patches provided in main.c.
+  // This will patch out all statically compiled symbols it can find with one of
+  // the available bridges. E.g., for fixing issues with broken audio or fonts on 
+  // certain GameMaker: Studio runner versions.
+  for (int i = 0; so_static_patches[i] != NULL; i++) {
+    DynLibFunction *funcs = so_static_patches[i];
+
+    for (int j = 0; funcs[j].symbol != NULL; j++) {
+      uintptr_t addr = so_symbol(mod, funcs[j].symbol);
+      if (addr) {
+        hook_address(mod, addr, funcs[j].func);
+      }
+    }
+  }
+
+  return 0;
+}
+
+void so_initialize(so_module *mod) {
+  for (int i = 0; i < mod->num_init_array; i++) {
+    if (mod->init_array[i]) {
+      mod->init_array[i]();
+    }
+  }
+}
+
+static uint32_t so_hash(const uint8_t *name) {
+  uint64_t h = 0, g;
+  while (*name) {
+    h = (h << 4) + *name++;
+    if ((g = (h & 0xf0000000)) != 0)
+      h ^= g >> 24;
+    h &= 0x0fffffff;
+  }
+  return h;
+}
+
+int so_symbol_index(so_module *mod, const char *symbol)
+{
+  if (mod->hash) {
+    uint32_t hash = so_hash((const uint8_t *)symbol);
+    uint32_t nbucket = mod->hash[0];
+    uint32_t *bucket = &mod->hash[2];
+    uint32_t *chain = &bucket[nbucket];
+    for (int i = bucket[hash % nbucket]; i; i = chain[i]) {
+      if (mod->dynsym[i].st_shndx == SHN_UNDEF)
+        continue;
+      if (mod->dynsym[i].st_info != SHN_UNDEF && strcmp(mod->dynstr + mod->dynsym[i].st_name, symbol) == 0)
+        return i;
+    }
+  }
+
+  for (int i = 0; i < mod->num_dynsym; i++) {
+    if (mod->dynsym[i].st_shndx == SHN_UNDEF)
+      continue;
+    if (mod->dynsym[i].st_info != SHN_UNDEF && strcmp(mod->dynstr + mod->dynsym[i].st_name, symbol) == 0)
+      return i;
+  }
+
+  return -1;
+}
+
+uintptr_t so_symbol(so_module *mod, const char *symbol) {
+  if (mod != NULL) {
+    int index = so_symbol_index(mod, symbol);
+    if (index >= 0)
+      return mod->base + mod->dynsym[index].st_value;
+  } else {
+    for (so_module *it: loaded_modules) {
+      int index = so_symbol_index(it, symbol);
+      if (index >= 0)
+        return it->base + it->dynsym[index].st_value;
+    }
+  }
+
+  return 0;
+}
+
+#if !defined(__arm__)
+void so_symbol_fix_ldmia(so_module *mod, const char *symbol)
+{
+  // For non-arm[hf] targets, there's not really any point in doing this hack 
+}
+#endif
+
+void hook_symbol(so_module *mod, const char *symbol, uintptr_t dst, int is_optional)
+{
+  uintptr_t address = so_symbol(mod, symbol);
+  if (address) {
+    hook_address(mod, address, dst);
+  } else {
+    if (!is_optional) {
+      fatal_error("Failed to perform hook for symbol \"%s\"!\n", symbol);
+      exit(-1);
+    } else {
+      warning("Failed to perform hook for symbol \"%s\"!\n", symbol);
+    }
+  }
+}
+
+void hook_symbols(so_module *mod, DynLibHooks *hooks)
+{
+  for (int i = 0; hooks[i].symbol != NULL; i++) {
+    hook_symbol(mod, hooks[i].symbol, hooks[i].hook, hooks[i].opt);
+  }
+}
+
+void rehook_new(so_module *mod, ReentrantHook *hook, uintptr_t addr, uintptr_t dst)
+{
+  hook->addr = addr;
+  memcpy(hook->prologue, (void *)addr, sizeof(hook->prologue));
+  hook_address(mod, addr, dst);
+  memcpy(hook->trampoline, (void *)addr, sizeof(hook->trampoline));
+  rehook_unhook(hook);
+}
+
+void rehook_hook(ReentrantHook *hook)
+{
+  memcpy((void *)hook->addr, (void *)hook->trampoline, sizeof(hook->trampoline));
+  __builtin___clear_cache((void *)hook->addr, (void *)hook->addr+sizeof(hook->trampoline));
+}
+
+void rehook_unhook(ReentrantHook *hook)
+{
+  memcpy((void *)hook->addr, (void *)hook->prologue, sizeof(hook->prologue));
+  __builtin___clear_cache((void *)hook->addr, (void *)hook->addr+sizeof(hook->prologue));
+}

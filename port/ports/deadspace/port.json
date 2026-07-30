@@ -1,0 +1,40 @@
+{
+  "version": 4,
+  "name": "deadspace.zip",
+  "items": [
+    "Dead Space.sh",
+    "deadspace"
+  ],
+  "attr": {
+    "title": "Dead Space",
+    "porter": [
+      "EapRules"
+    ],
+    "desc": "Arcade ice hockey by Mountain Sheep. One-on-one matches with a skater and a goalie a side, played for slapshots and body checks rather than for the rulebook. This port runs the game's original Android native library directly on Linux through a NativeActivity loader, so no emulator is involved.",
+    "desc_md": null,
+    "inst": "You need your own copy: the Android APK for net.mountainsheep.deadspace. Use the OUYA build (v1.8, October 2013) - it is the one made for a controller. The Google Play build is touch-only and this port cannot drive it: that engine rejects touch events outright on the OUYA library and the menus never respond.\n\nRename the APK to deadspace.apk and put it in ports/deadspace/ while the card is still in your computer, in the same trip as the zip - watch the extension, some download sites hand you .5apk or .apk.zip. Nothing is downloaded and no game data ships in this zip.\n\nAFTER INSTALLING, REBOOT THE CONSOLE. The game does not appear in Ports until you do: the autoinstall never refreshes the frontend. And do not use Reinstall or Uninstall under Manage Ports - they re-download from PortMaster's catalogue, where this port does not exist, and remove it in the process.\n\nControls: left stick skates, A shoots and checks, R1 and L1 also act in the menus. Start opens the game's own menu.\n\nRequires an armhf userland with 32-bit GPU libraries, the same bar as box86 and GMLoader.",
+    "inst_md": null,
+    "genres": [
+      "sports",
+      "arcade"
+    ],
+    "image": {},
+    "rtr": false,
+    "runtime": null,
+    "reqs": [
+      "armhf"
+    ],
+    "arch": [
+      "armhf"
+    ],
+    "min_glibc": "2.38",
+    "status": {
+      "source": "https://github.com/eaprules/deadspace-portmaster",
+      "date_added": "2026-07-30"
+    },
+    "publisher": "Mountain Sheep",
+    "developer": "Mountain Sheep",
+    "released": "2013-10-08",
+    "players": "1-2"
+  }
+}

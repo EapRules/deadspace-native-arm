@@ -1,0 +1,23 @@
+# Cross-compilation environment for the Minigore 2 armhf loader.
+# Runs natively on arm64 (fast) and emits arm-linux-gnueabihf binaries, which is
+# what the R36S needs: the game's only native library is armeabi-v7a.
+FROM debian:trixie
+
+RUN dpkg --add-architecture armhf && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        crossbuild-essential-armhf \
+        pkg-config \
+        make \
+        git \
+        ca-certificates \
+        file \
+        libsdl2-dev:armhf \
+        zlib1g-dev:armhf \
+        libzip-dev:armhf \
+        libbsd-dev:armhf \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
+ENV PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig
+WORKDIR /src
