@@ -50,6 +50,40 @@ template <> struct va_promoted<float>          { using type = double; };
 template <typename T>
 using va_promoted_t = typename va_promoted<T>::type;
 
+/*
+ * One argument off the va_list, with a barrier so the compiler cannot merge two
+ * of them into a single ldrd.
+ *
+ * ldrd loads two words at once and requires the address to be 8-byte aligned.
+ * gcc emits it freely for consecutive va_arg reads because AAPCS promises an
+ * 8-aligned stack - and the promise holds for code gcc compiled. It does not
+ * hold here: the va_list belongs to the *game*, built with a 2011 NDK that
+ * aligns to 4, so the pair load faults.
+ *
+ * What that looks like is a SIGBUS at an odd-looking address inside this
+ * loader, reached from the game, on a JNI method that merely happens to take
+ * two adjacent integers:
+ *
+ *     3b390:  ldrd r3, r4, [r3]     ; r3 = the va_list
+ *
+ * AudioTrack.write([SII)I was the first method to hit it because it is the
+ * first with two int arguments in a row. Every other overload was one merge
+ * away from the same fault, so this is fixed at the template rather than at the
+ * call site.
+ *
+ * The barrier is the whole mechanism: it costs nothing at runtime and it stops
+ * the ldrd peephole from seeing the two loads as adjacent. Same family as the
+ * va_promoted fix above - the machinery was written for a caller with the
+ * host's guarantees and the caller is a different compiler's output.
+ */
+template <typename T>
+static inline T va_next(va_list &va)
+{
+    T v = (T)va_arg(va, va_promoted_t<T>);
+    __asm__ __volatile__("" ::: "memory");
+    return v;
+}
+
 // Automatic generator for function dispatch
 template <auto F, class... Prelude>
 struct dispatch
@@ -95,9 +129,9 @@ struct dispatch
         static R dispatch_v(Prelude... pre_args, va_list va)
         {
             if constexpr (std::is_same_v<R, void>) {
-                BraceCallVoid{pre_args..., (Args)va_arg(va, va_promoted_t<Args>)...};
+                BraceCallVoid{pre_args..., va_next<Args>(va)...};
             } else {
-                return BraceCall{pre_args..., (Args)va_arg(va, va_promoted_t<Args>)...}.ret;
+                return BraceCall{pre_args..., va_next<Args>(va)...}.ret;
             }
         }
 

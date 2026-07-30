@@ -101,6 +101,55 @@ int AudioTrack::write(JNIEnv *env, jobject obj, jclass clazz, jbyteArray audioDa
         return 0;
 }
 
+/*
+ * The 16-bit overload, which this engine is the first to ask for.
+ *
+ * AudioTrack.write has a byte[] form and a short[] form, and Android treats the
+ * count argument differently in each: bytes for one, *samples* for the other.
+ * Dead Space uses the short[] form - the run log said so the moment the audio
+ * core came up:
+ *
+ *     Class AudioClass does not have method write([SII)I
+ *
+ * and a missing method here is not a silent no-op. GetMethodID returns NULL, the
+ * engine writes into nothing, and the mixer either stalls waiting for the queue
+ * to drain or spins feeding a device that never consumes.
+ *
+ * The conversion is the whole point of a separate entry rather than an alias:
+ * SDL_QueueAudio counts bytes, so the sample count doubles. Registering this
+ * signature against the byte[] implementation would have queued half the audio
+ * and produced a stutter that sounds like a performance problem.
+ */
+int AudioTrack::write_shorts(JNIEnv *env, jobject obj, jclass clazz,
+                             jshortArray audioData, int offsetInShorts,
+                             int sizeInShorts)
+{
+    Class *clz = (Class *)clazz;
+    (void)clz;
+    AudioTrack  *track = (AudioTrack *)obj;
+    ArrayObject *data  = (ArrayObject *)audioData;
+
+    if (!track || !data || !data->elements)
+        return 0;
+
+    uintptr_t where = (uintptr_t)data->elements + (size_t)offsetInShorts * 2;
+    int       bytes = sizeInShorts * 2;
+
+    int ret = SDL_QueueAudio(track->deviceId, (void *)where, bytes);
+
+    if (track->playing == 0)
+        AudioTrack::play(env, obj, clazz);
+
+    /* Blocking, like the byte[] path: the engine's mixer thread expects write()
+     * to be back-pressure, and returning immediately makes it produce as fast
+     * as it can into a queue that only grows. */
+    do {
+        SDL_Delay(0);
+    } while (SDL_GetQueuedAudioSize(track->deviceId));
+
+    return ret == 0 ? sizeInShorts : 0;
+}
+
 const FieldId mediaAudioTrackClassFields[] = {
     {NULL},
 };
@@ -113,6 +162,14 @@ const ManagedMethod mediaAudioTrackClassMethods[] = {
     REGISTER_NONVIRTUAL(AudioTrack, release, "()V"),
     REGISTER_NONVIRTUAL(AudioTrack, write, "([BII)I", int, jbyteArray, int, int),
     REGISTER_NONVIRTUAL(AudioTrack, write, "([BIII)I", int, jbyteArray, int, int, int),
+    /* Registered by hand rather than through REGISTER_NONVIRTUAL: that macro
+     * takes the Java method name from the C++ identifier, which would publish
+     * this as "write_shorts" and leave the engine's lookup of "write([SII)I"
+     * failing exactly as before. The C++ name has to differ - it is an overload
+     * the deduction macro cannot disambiguate - so the Java name is given
+     * explicitly. */
+    ManagedMethod::RegisterNonVirtual<&AudioTrack::write_shorts>(
+        AudioTrack::clazz, "write", "([SII)I"),
     NULL
 };
 

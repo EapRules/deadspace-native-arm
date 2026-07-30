@@ -89,7 +89,43 @@ static jstring Query_getVersion(JNIEnv *env, jclass clazz)
     return (jstring)cached;
 }
 
+/*
+ * How much memory the engine believes it has, in megabytes.
+ *
+ * Not yet requested in any run log - it is added because the Vita port
+ * implements it and because of where the current M4 fault lands. The engine
+ * dies with an empty std::vector whose push_back never happened, and the push
+ * is guarded by an allocator returning NULL:
+ *
+ *     2dd518  bl 3007bc          ; the allocator singleton
+ *     2dd538  ldr pc, [ip, #12]  ; allocate(44, ...)
+ *     2dd53c  subs r5, r0, #0    ; and check for NULL
+ *
+ * An engine that sized its pool from a zero answer here would fail every
+ * allocation exactly like that. This is a hypothesis, not a diagnosis, and it
+ * is cheap enough to settle by answering honestly rather than by argument.
+ *
+ * 256 is what the Vita port returns and it is also true of the target: the R36S
+ * has 1 GB with the CFW and framebuffer already in it, and no port should try
+ * to claim all of it. If the engine ever does scale a pool from this number,
+ * the log line makes that visible in one run.
+ */
+static jlong Query_getTotalMemory(JNIEnv *env, jclass clazz)
+{
+    (void)env;
+    (void)clazz;
+
+    static bool announced = false;
+    if (!announced) {
+        announced = true;
+        trace("Query.getTotalMemory -> 256 MB");
+    }
+    return 256;
+}
+
 const ManagedMethod QueryClassMethods[] = {
+    ManagedMethod::RegisterStatic<&Query_getTotalMemory>(
+        Query::clazz, "getTotalMemory", "()J"),
     ManagedMethod::RegisterStatic<&Query_isContentReady>(
         Query::clazz, "isContentReady", "()Z"),
     ManagedMethod::RegisterStatic<&Query_getVersion>(

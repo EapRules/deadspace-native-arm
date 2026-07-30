@@ -22,6 +22,7 @@ public:
     static void release(JNIEnv *env, jobject obj, jclass clazz);
     static int write(JNIEnv *env, jobject obj, jclass clazz, jbyteArray audioData, int offsetInBytes, int sizeInBytes);
     static int write(JNIEnv *env, jobject obj, jclass clazz, jbyteArray audioData, int offsetInBytes, int sizeInBytes, int writeMode);
+    static int write_shorts(JNIEnv *env, jobject obj, jclass clazz, jshortArray audioData, int offsetInShorts, int sizeInShorts);
 
     unsigned int needed_bytes;
     SDL_AudioSpec desired, obtained;
