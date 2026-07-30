@@ -38,6 +38,8 @@ double exp(double);
 double floor(double);
 double fmod(double, double);
 double log(double);
+double log10(double);
+double modf(double, double *);
 double pow(double, double);
 double rint(double);
 double sin(double);
@@ -47,10 +49,13 @@ double tan(double);
 float acosf(float);
 float asinf(float);
 float atan2f(float, float);
+float ceilf(float);
 float cosf(float);
+float expf(float);
 float floorf(float);
 float fmodf(float, float);
 float ldexpf(float, int);
+float log10f(float);
 float logf(float);
 float powf(float, float);
 float rintf(float);
@@ -123,6 +128,10 @@ DynLibFunction symtable_libm[] = {
     THUNK_SPECIFIC("floor",  HOST_MATH::floor),
     THUNK_SPECIFIC("fmod",   HOST_MATH::fmod),
     THUNK_SPECIFIC("log",    HOST_MATH::log),
+    THUNK_SPECIFIC("log10",  HOST_MATH::log10),
+    /* modf writes its integral part through a double* - the pointer crosses
+     * the ABI boundary unchanged, only the return value needs the bridge. */
+    THUNK_SPECIFIC("modf",   HOST_MATH::modf),
     THUNK_SPECIFIC("pow",    HOST_MATH::pow),
     THUNK_SPECIFIC("rint",   HOST_MATH::rint),
     THUNK_SPECIFIC("sin",    HOST_MATH::sin),
@@ -132,10 +141,13 @@ DynLibFunction symtable_libm[] = {
     THUNK_SPECIFIC("acosf",  HOST_MATH::acosf),
     THUNK_SPECIFIC("asinf",  HOST_MATH::asinf),
     THUNK_SPECIFIC("atan2f", HOST_MATH::atan2f),
+    THUNK_SPECIFIC("ceilf",  HOST_MATH::ceilf),
     THUNK_SPECIFIC("cosf",   HOST_MATH::cosf),
+    THUNK_SPECIFIC("expf",   HOST_MATH::expf),
     THUNK_SPECIFIC("floorf", HOST_MATH::floorf),
     THUNK_SPECIFIC("fmodf",  HOST_MATH::fmodf),
     THUNK_SPECIFIC("ldexpf", HOST_MATH::ldexpf),
+    THUNK_SPECIFIC("log10f", HOST_MATH::log10f),
     THUNK_SPECIFIC("logf",   HOST_MATH::logf),
     THUNK_SPECIFIC("powf",   HOST_MATH::powf),
     THUNK_SPECIFIC("rintf",  HOST_MATH::rintf),

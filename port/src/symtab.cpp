@@ -30,6 +30,8 @@ extern DynLibFunction symtable_pthread[];   /* src/symtab_pthread.cpp       */
 extern DynLibFunction symtable_stat[];      /* src/symtab_stat.cpp          */
 extern DynLibFunction symtable_glprobe[];   /* src/symtab_glprobe.cpp       */
 extern DynLibFunction symtable_unwind[];    /* src/symtab_unwind.cpp        */
+extern DynLibFunction symtable_bionic[];    /* src/symtab_bionic.cpp        */
+extern DynLibFunction symtable_off[];       /* src/symtab_off.cpp           */
 
 /*
  * libandroid.so — the 42 symbols the game actually imports, implemented in
@@ -149,6 +151,14 @@ DynLibFunction *so_dynamic_libraries[] = {
     symtable_time,
     symtable_pthread,
     symtable_stat,
+    /* off_t is 8 bytes on this host and 4 in the game; mmap/lseek/ftruncate
+     * therefore disagree about register layout, not just field width. */
+    symtable_off,
+    /* The imports the generated bionic table left commented out: bionic-only
+     * atomics, three OBJECT symbols, variadic fcntl, and readdir_r with its
+     * own dirent layout. Ahead of symtable_libc because readdir_r's layout
+     * disagreement is exactly the kind the generated entry gets wrong. */
+    symtable_bionic,
     /* Shadows the host libgcc's __gnu_Unwind_Find_exidx, which cannot see a
      * module this loader mapped; must therefore come before symtable_libc. */
     symtable_unwind,

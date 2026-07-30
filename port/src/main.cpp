@@ -124,8 +124,27 @@ static int report_unresolved_symbols(so_module *mod)
  * static constructor calling one of 205 unbound imports. Naming them is the
  * whole point of being here rather than after so_initialize().
  */
+/*
+ * The loaded game, for the fake JNI classes that have to call back into it.
+ *
+ * Several of the Java classes this port fakes are not really Java at all: their
+ * methods are declared native on Android, so calling them through JNI lands
+ * back in this same .so. com/ea/EAIO/EAIO.Startup is the first one the engine
+ * reaches. Those forwarders need the module, and they run long after main()
+ * has handed control to the game, so a lookup is cheaper than threading a
+ * pointer through the class registry.
+ *
+ * Matching by DT_SONAME - which is what jni_resolve_native() does - is not an
+ * option here: this build has none, and the loader logs it as
+ * "Linking <no DT_SONAME>".
+ */
+static so_module *g_module = NULL;
+
+so_module *deadspace_module(void) { return g_module; }
+
 extern "C" int so_after_relocate(so_module *mod)
 {
+    g_module = mod;
     trace("module loaded");
 
     int missing = report_unresolved_symbols(mod);

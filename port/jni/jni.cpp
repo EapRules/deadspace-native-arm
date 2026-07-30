@@ -70,8 +70,21 @@ ABI_ATTR static jclass iface_FindClass(JNIEnv *env, const char* name)
     auto registry = ClassRegistry::get_class_registry();
     auto it = std::find_if(registry.begin(), registry.end(),
         [&](auto *item) { return strcmp(name, item->classpath) == 0; });
-    if (it == registry.end())
+    if (it == registry.end()) {
+        /*
+         * Say so. A missing class used to return NULL in silence, and the cost
+         * of that silence is specific: GetStaticMethodID guards its own warning
+         * on a non-NULL class, so it then also returns NULL without a word, and
+         * the engine calls straight through it. What reaches the log is a
+         * SIGSEGV with pc = 0 and a link register pointing into this loader -
+         * which reads like a bug in our code, and took a disassembly session to
+         * trace back to a class nobody had registered. One line here is the
+         * difference between that and an obvious answer.
+         */
+        warning("FindClass: no fake class registered for '%s' - every method "
+                "the game looks up on it will come back NULL.\n", name);
         return NULL;
+    }
 
     return (jclass)*it;
 }
