@@ -49,6 +49,7 @@
 #include "khronos/gles2.h"
 
 #include "jni.h"
+#include "classes/media_AudioTrack.h"
 
 #include "crash.h"
 #include "fix_path.h"
@@ -389,11 +390,49 @@ int main(int argc, char **argv)
     JNI_OnLoad(vm, NULL);
     trace("JNI_OnLoad returned");
 
-    /* EAAudioCore__Startup() belongs here, between JNI_OnLoad and
-     * NativeOnCreate. It is not written yet: the engine drives audio through
-     * JNI against a Java AudioTrack, not OpenSL ES, so the inherited
-     * android/opensles.cpp answers none of it. Left out rather than stubbed
-     * wrong, and noted so the gap is visible in the sequence. */
+    /*
+     * Bring the audio core up, between JNI_OnLoad and NativeOnCreate.
+     *
+     * This was left out at first, on the reasoning that audio is polish and the
+     * port could reach a frame without it. That was wrong, and the run log said
+     * so once the crash reports became readable: the engine opens
+     * published/sounds/soundBase.sb and then faults on `ldr r1, [r3]` with
+     * r3 = 0 - an object whose vtable word is zero, i.e. one that was never
+     * constructed. Init is what constructs it. Skipping it does not disable
+     * audio, it leaves the engine holding a half-built object that it has no
+     * reason to check before using.
+     *
+     * The arguments come from the Vita port, which runs this same build:
+     * a 1 MiB buffer, stereo, 44100 Hz. Two of its choices are not copied.
+     *
+     * It passes 0x42424242 for `this` and 0x69696969 for the AudioTrack -
+     * sentinels its fake JNI recognises by value. Ours resolves methods through
+     * a class registry and calls _getClass() on the receiver, so a sentinel
+     * would fault the moment the engine called anything on it. A real instance
+     * of the AudioTrack fake class goes in instead, which is also what makes
+     * SDL produce sound rather than merely not crash.
+     *
+     * `this` stays a sentinel: the method is static in Java and the engine
+     * never dereferences it, so a made-up object would be less honest about
+     * that than a value nobody can mistake for one.
+     */
+    {
+        auto EAAudioCore_Init = (void (*)(JNIEnv *, void *, jobject, int, int, int))
+            so_symbol(mod, "Java_com_ea_EAAudioCore_AndroidEAAudioCore_Init");
+
+        if (!EAAudioCore_Init) {
+            trace("no AndroidEAAudioCore_Init export - audio core left down");
+        } else {
+            /* streamType 3 = STREAM_MUSIC, channelConfig 3 = CHANNEL_STEREO,
+             * audioFormat 2 = ENCODING_PCM_16BIT, mode 0 = MODE_STREAM. */
+            jobject track = (jobject)new AudioTrack(3, 44100, 3,
+                                                    ENCODING_PCM_16BIT,
+                                                    1024 * 1024, MODE_STREAM);
+            EAAudioCore_Init(env, (void *)0x42424242, track,
+                             1024 * 1024, 2, 44100);
+            trace("EAAudioCore init done (1 MiB buffer, stereo, 44100 Hz)");
+        }
+    }
 
     NativeOnCreate();
     trace("NativeOnCreate returned");
