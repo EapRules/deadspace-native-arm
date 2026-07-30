@@ -427,8 +427,32 @@ static pthread_mutex_t *host_mutex(BIONIC_pthread_mutex_t *m)
     if (!m)
         return NULL;
 
-    if ((uintptr_t)m->real_mtx > kBionicInitWordMax)
-        return m->real_mtx;
+    /*
+     * Acquire, not a plain read.
+     *
+     * This is double-checked locking, and the fast path below never takes
+     * g_mutex_bootstrap - so without an acquire here there is no happens-before
+     * edge between another thread initialising the mutex body and this thread
+     * seeing the pointer. On ARM, which is weakly ordered, a thread can observe
+     * the published pointer and still read a pthread_mutex_t whose fields have
+     * not arrived. glibc then locks on uninitialised __kind and __lock and
+     * waits on a futex nobody will wake.
+     *
+     * That is not a theoretical path in this game. EAThread emulates 64-bit
+     * atomics with a table of 32 static mutexes in .bss, indexed by hashing the
+     * address (`lsr r5,r4,#1 ; and r5,r5,#0x7c` at +0x24bdec) and locked on
+     * every 64-bit load and store from any thread. Being in .bss they all start
+     * at zero, so every one of them goes through this lazy creation, from
+     * several threads, starting on the first frame.
+     *
+     * The release store below is the other half. real_mtx is also read through
+     * __atomic_load_n rather than as a plain field so the compiler cannot
+     * reload it between the check and the return.
+     */
+    pthread_mutex_t *fast = (pthread_mutex_t *)__atomic_load_n(
+        (void **)&m->real_mtx, __ATOMIC_ACQUIRE);
+    if ((uintptr_t)fast > kBionicInitWordMax)
+        return fast;
 
     pthread_mutex_lock(&g_mutex_bootstrap);
 
@@ -455,12 +479,15 @@ static pthread_mutex_t *host_mutex(BIONIC_pthread_mutex_t *m)
             }
             pthread_mutex_init(host, &attr);
             pthread_mutexattr_destroy(&attr);
-            m->real_mtx = host;
+            /* Release: everything written into *host above must be visible to
+             * any thread that sees this pointer on the fast path. */
+            __atomic_store_n((void **)&m->real_mtx, host, __ATOMIC_RELEASE);
         }
     }
 
     pthread_mutex_unlock(&g_mutex_bootstrap);
-    return m->real_mtx;
+    return (pthread_mutex_t *)__atomic_load_n((void **)&m->real_mtx,
+                                              __ATOMIC_ACQUIRE);
 }
 
 int bionic_pthread_mutex_init(BIONIC_pthread_mutex_t *m, pthread_mutexattr_t **attr)
