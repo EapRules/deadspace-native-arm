@@ -26,6 +26,45 @@ necesitó vitaGL porque su GPU no lo tiene; acá viene de fábrica.
 ARMv8 deprecó. Los 17 `cdp` que aparecen son literal pools dentro de `.text` que
 objdump desensambla como código — apuntan a coprocesadores que no existen.
 
+## Lo que ese chequeo NO vio: short vectors de VFP
+
+El párrafo de arriba busca **instrucciones** deprecadas. Los short vectors no son una
+instrucción, son un **modo**, y por ahí se colaron. Hay 40 escrituras a `FPSCR` con
+este patrón:
+
+```
+vmrs r0, fpscr
+bic  r0, r0, #0x370000    ; limpia LEN (18:16) y STRIDE (21:20)
+orr  r0, r0, #0x30000     ; LEN=3 -> vector de 4   (o #0x70000 -> vector de 8)
+vmsr fpscr, r0
+vpush {d8-d15}
+```
+
+Desde VFPv3 esos campos son RAZ/WI: la escritura se ignora y las instrucciones corren
+**escalares**. Sin trap y sin crash — código que espera 4 u 8 resultados obtiene 1.
+
+**Y el harness no lo ve, porque qemu sí los emula.** Medido:
+
+```
+FPSCR: 0x00000000 -> 0x00030000 | LEN leido de vuelta = 3
+```
+
+O sea el emulador guarda LEN y el hardware no. Es la peor forma de divergencia para un
+loop que se autovalida contra qemu: optimista y silenciosa.
+
+**Lo que acota el daño**: las 40 están **todas en el bloque de audio**
+(`Java_com_ea_EAAudioCore_AndroidEAAudioCore_Release` y
+`Java_com_ea_EAMAudio_EAMAudioCoreWrapper_NativePause`), ninguna en geometría, física
+ni transforms. Así que:
+
+- no puede falsear M5–M7, que miden frames, assets, texturas y draws;
+- el síntoma esperado en la consola es audio mal, no geometría deformada;
+- y como el backend de audio lo proveemos nosotros (`EAAudioCore` / AudioTrack falso),
+  puede que ese DSP ni se ejecute en el camino que terminemos usando.
+
+Verificar en la consola antes de dar el audio por bueno. No asumir que porque sonó bien
+bajo el harness va a sonar bien en el aparato.
+
 ## Lo que SÍ cambia respecto de Minigore 2 e Ice Rage
 
 ### 1. No es NativeActivity. Nosotros somos el Java.

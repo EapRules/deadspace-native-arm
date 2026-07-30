@@ -51,6 +51,8 @@
 #include "jni.h"
 
 #include "crash.h"
+#include "fix_path.h"
+#include "patch.h"
 #include "trace.h"
 
 /*
@@ -148,8 +150,17 @@ extern "C" int so_after_relocate(so_module *mod)
     trace("module loaded");
 
     int missing = report_unresolved_symbols(mod);
-    if (missing == 0)
+    if (missing == 0) {
+        /*
+         * Rewrite the engine's asset I/O dispatch before any of its code runs.
+         * This is the window the Vita port uses too - relocated, not yet
+         * initialised - and it is the only one: so_initialize() below starts
+         * the static constructors, and the .text is mprotect'd back to
+         * read-only once the load finishes.
+         */
+        so_patch_binary(mod);
         return 0;
+    }
 
     fatal("%d import(s) of %s have no implementation (listed above).\n"
           "       Running the game now would fault on the first call to any\n"
@@ -184,6 +195,11 @@ int main(int argc, char **argv)
     }
 
     const char *game_dir = argv[1];
+
+    /* Before anything of the game's runs: the libc path thunks translate
+     * "appbundle:/..." against this and the engine opens its first file from
+     * inside a static initialiser. */
+    io_set_game_dir(game_dir);
 
     char lib_dir[PATH_MAX];
     char lib_path[PATH_MAX];

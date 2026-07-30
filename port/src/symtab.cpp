@@ -27,7 +27,9 @@ extern DynLibFunction symtable_opensles[];  /* android/opensles.cpp         */
 extern DynLibFunction symtable_libm[];      /* src/symtab_libm.cpp          */
 extern DynLibFunction symtable_time[];      /* src/symtab_time.cpp          */
 extern DynLibFunction symtable_pthread[];   /* src/symtab_pthread.cpp       */
+extern DynLibFunction symtable_sem[];       /* src/symtab_sem.cpp           */
 extern DynLibFunction symtable_stat[];      /* src/symtab_stat.cpp          */
+extern DynLibFunction symtable_io[];        /* src/symtab_io.cpp            */
 extern DynLibFunction symtable_glprobe[];   /* src/symtab_glprobe.cpp       */
 extern DynLibFunction symtable_unwind[];    /* src/symtab_unwind.cpp        */
 extern DynLibFunction symtable_bionic[];    /* src/symtab_bionic.cpp        */
@@ -150,7 +152,17 @@ DynLibFunction *so_dynamic_libraries[] = {
      * about the size or layout of a type; must therefore come first. */
     symtable_time,
     symtable_pthread,
+    /* bionic's sem_t is one word and glibc's is four; sem_init bound straight
+     * through writes twelve bytes past the end of every semaphore the engine
+     * owns. Must come before symtable_libc for the same reason as the mutex
+     * bridge above it. */
+    symtable_sem,
     symtable_stat,
+    /* Every libc entry point that takes a *path*. The engine addresses its
+     * assets as "appbundle:/..." - a scheme, not a filename - so these have to
+     * shadow the generated table or the names reach the kernel verbatim and
+     * ENOENT. See src/symtab_io.cpp for the strace that showed it. */
+    symtable_io,
     /* off_t is 8 bytes on this host and 4 in the game; mmap/lseek/ftruncate
      * therefore disagree about register layout, not just field width. */
     symtable_off,

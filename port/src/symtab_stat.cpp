@@ -24,6 +24,9 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <string.h>
+#include <limits.h>
+
+#include "fix_path.h"
 
 #include "so_util.h"
 #include "thunk_gen.h"
@@ -61,6 +64,8 @@ static_assert(sizeof(struct bionic_stat) == 104,
 static_assert(offsetof(struct bionic_stat, st_size) == 48,
               "st_size at 48 is what the game's generated code indexes");
 
+static int convert(const struct stat64 &host, struct bionic_stat *out);
+
 extern "C" int bionic_fstat(int fd, struct bionic_stat *out)
 {
     if (!out)
@@ -73,8 +78,38 @@ extern "C" int bionic_fstat(int fd, struct bionic_stat *out)
     if (rc != 0)
         return rc;
 
+    return convert(host, out);
+}
+
+/*
+ * stat() by name, which needs both halves of this port's I/O repair at once:
+ * the layout conversion below and the path translation in src/symtab_io.cpp.
+ *
+ * It was not here before because nothing had called it yet - the engine only
+ * reaches the by-name variant once it is walking its own asset tree, and that
+ * is past the content gate it was parked at. Left bound to the host's, it
+ * would write a time64 struct into the 104-byte frame the game reserved and
+ * report a garbage st_size for every asset: the same silent corruption fstat
+ * was fixed for, one call site later.
+ */
+extern "C" int bionic_stat(const char *path, struct bionic_stat *out)
+{
+    if (!out)
+        return -1;
+
+    char buf[PATH_MAX];
+    struct stat64 host;
+    int rc = stat64(fix_path(path, buf, sizeof(buf)), &host);
+    if (rc != 0)
+        return rc;
+
+    return convert(host, out);
+}
+
+static int convert(const struct stat64 &host, struct bionic_stat *out)
+{
     memset(out, 0, sizeof(*out));
-    out->st_dev         = (uint64_t)host.st_dev;
+    out->st_dev       = (uint64_t)host.st_dev;
     out->__st_ino       = (uint32_t)host.st_ino;
     out->st_mode        = (uint32_t)host.st_mode;
     out->st_nlink       = (uint32_t)host.st_nlink;
@@ -99,5 +134,6 @@ extern "C" int bionic_fstat(int fd, struct bionic_stat *out)
 
 DynLibFunction symtable_stat[] = {
     NO_THUNK("fstat", (uintptr_t)&bionic_fstat),
+    NO_THUNK("stat",  (uintptr_t)&bionic_stat),
     { NULL, 0 },
 };
