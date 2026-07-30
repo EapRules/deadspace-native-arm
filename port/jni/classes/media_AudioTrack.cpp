@@ -4,6 +4,7 @@
 #include "platform.h"
 #include "jni.h"
 #include "jni_internals.h"
+#include "trace.h"
 #include "media_AudioTrack.h"
 
 static int GetSDLFormat(int audioFormat)
@@ -120,17 +121,38 @@ int AudioTrack::write(JNIEnv *env, jobject obj, jclass clazz, jbyteArray audioDa
  * signature against the byte[] implementation would have queued half the audio
  * and produced a stutter that sounds like a performance problem.
  */
-int AudioTrack::write_shorts(JNIEnv *env, jobject obj, jclass clazz,
+int AudioTrack::write_shorts(JNIEnv *env, jobject obj,
                              jshortArray audioData, int offsetInShorts,
                              int sizeInShorts)
 {
-    Class *clz = (Class *)clazz;
-    (void)clz;
     AudioTrack  *track = (AudioTrack *)obj;
     ArrayObject *data  = (ArrayObject *)audioData;
 
-    if (!track || !data || !data->elements)
+    /* Defensive, and instrumented, because the first run of this path arrived
+     * with a jshortArray of 0x83469cb5 - not a pointer this loader ever handed
+     * out. Whether the engine passes something unexpected or the dispatcher
+     * reads the wrong slot is not answerable by reading code, so both are
+     * printed once. */
+    static bool announced = false;
+    if (!announced) {
+        announced = true;
+        trace("AudioTrack.write(short[]): track=%p data=%p offset=%d count=%d",
+              (void *)track, (void *)data, offsetInShorts, sizeInShorts);
+    }
+
+    if (!track || !data)
         return 0;
+
+    /* An ArrayObject this loader allocated always has a non-null elements
+     * pointer and an element_size of 2 for a short[]. Anything else is not one
+     * of ours, and dereferencing it is how this crashed. */
+    if (data->element_size != (jsize)sizeof(short) || !data->elements) {
+        warning("AudioTrack.write(short[]): array at %p is not a short[] this "
+                "loader allocated (element_size=%d, elements=%p) - dropping the "
+                "write rather than following the pointer.\n",
+                (void *)data, (int)data->element_size, data->elements);
+        return 0;
+    }
 
     uintptr_t where = (uintptr_t)data->elements + (size_t)offsetInShorts * 2;
     int       bytes = sizeInShorts * 2;
@@ -138,7 +160,7 @@ int AudioTrack::write_shorts(JNIEnv *env, jobject obj, jclass clazz,
     int ret = SDL_QueueAudio(track->deviceId, (void *)where, bytes);
 
     if (track->playing == 0)
-        AudioTrack::play(env, obj, clazz);
+        AudioTrack::play(env, obj, (jclass)&AudioTrack::clazz);
 
     /* Blocking, like the byte[] path: the engine's mixer thread expects write()
      * to be back-pressure, and returning immediately makes it produce as fast
@@ -168,7 +190,21 @@ const ManagedMethod mediaAudioTrackClassMethods[] = {
      * failing exactly as before. The C++ name has to differ - it is an overload
      * the deduction macro cannot disambiguate - so the Java name is given
      * explicitly. */
-    ManagedMethod::RegisterNonVirtual<&AudioTrack::write_shorts>(
+    /* Register, not RegisterNonVirtual, and the distinction is load-bearing.
+     *
+     * RegisterNonVirtual builds a dispatcher taking (JNIEnv*, jobject, jclass,
+     * va_list). iface_CallMethodV - which is what the engine reaches through
+     * CallIntMethod, the ordinary way to call an instance method - casts
+     * addr_variadic to (JNIEnv*, jobject, va_list) and passes three arguments.
+     * The four-argument dispatcher then reads one register too far and takes
+     * whatever is there as its va_list.
+     *
+     * That does not fail cleanly. It arrived as a jshortArray of 0x83469cb5
+     * with a count of -599784200 - audio sample data being read as arguments -
+     * and faulted deep inside this function on a pointer that was never a
+     * pointer. Only CallNonvirtual* supplies the jclass, and nothing calls
+     * AudioTrack.write that way. */
+    ManagedMethod::Register<&AudioTrack::write_shorts>(
         AudioTrack::clazz, "write", "([SII)I"),
     NULL
 };
