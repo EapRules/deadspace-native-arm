@@ -67,7 +67,10 @@
 #include <stdint.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+#include <stdlib.h>
 #include <unistd.h>
+
+#include "trace.h"
 
 #include "so_util.h"
 #include "thunk_gen.h"
@@ -90,7 +93,23 @@ typedef int32_t bionic_off_t;
 void *bionic_mmap(void *addr, size_t length, int prot, int flags,
                   int fd, bionic_off_t offset)
 {
-    return mmap64(addr, length, prot, flags, fd, (off64_t)offset);
+    void *r = mmap64(addr, length, prot, flags, fd, (off64_t)offset);
+
+    /*
+     * Traced behind an env var rather than left to be re-derived.
+     *
+     * This is the call EA's GeneralAllocator makes to acquire a core block, and
+     * when it fails every Malloc in the engine returns NULL - which surfaces
+     * far away as an empty std::vector, or an object with a null vtable, and
+     * looks like anything but an allocation failure. The comment at the top of
+     * this file describes exactly that hunt. One env var makes the next one a
+     * single run.
+     */
+    if (getenv("DEADSPACE_TRACE_MMAP"))
+        trace("mmap(%p, %zu, prot=%d, flags=%d, fd=%d, off=%d) = %p%s",
+              addr, length, prot, flags, fd, (int)offset, r,
+              r == MAP_FAILED ? "  MAP_FAILED" : "");
+    return r;
 }
 
 /*
