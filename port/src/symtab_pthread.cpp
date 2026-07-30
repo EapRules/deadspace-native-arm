@@ -213,7 +213,27 @@ static bool is_late_thread(void *(*entry)(void *))
 static void delay_late_thread(void)
 {
     const char *env = getenv("DEADSPACE_LATE_THREAD_MS");
-    int ms = env ? atoi(env) : 1500;
+    /*
+     * Off by default now, and the measurement that changed it is worth keeping.
+     *
+     * When this was added the run faulted in two different places on identical
+     * runs, and delaying every engine thread by 1500 ms made it land in one
+     * place reliably - the race was real. It is no longer: with the ABI fixes
+     * that followed (va_arg promotion, the ldrd alignment trap, and the
+     * dispatch-arity mismatch, all in the JNI machinery), 0 ms and 5000 ms per
+     * thread now produce a byte-identical fault at +0x30a744.
+     *
+     * So the race was almost certainly never the engine's. It was ours: garbage
+     * arguments reaching JNI methods, which is exactly the kind of corruption
+     * whose timing depends on which thread got there first. Keeping a nine
+     * second startup delay to hide a bug that no longer exists would be
+     * shipping a workaround for someone else's fixed problem.
+     *
+     * Left reachable rather than deleted, because the Vita port needed it and
+     * this build is the same: if a non-deterministic fault ever returns, set
+     * DEADSPACE_LATE_THREAD_MS and find out in one run whether it is a race.
+     */
+    int ms = env ? atoi(env) : 0;
     if (ms <= 0)
         return;
 
