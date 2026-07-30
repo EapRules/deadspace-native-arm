@@ -20,6 +20,7 @@
 
 extern DynLibFunction symtable_libc[];      /* thunks/libc/libc_table.cpp   */
 extern DynLibFunction symtable_gles2[];     /* thunks/khronos/gles2.cpp     */
+extern DynLibFunction symtable_gles1[];     /* thunks/khronos/gles1.cpp     */
 extern DynLibFunction symtable_egl[];       /* android/egl_shim.cpp         */
 extern DynLibFunction symtable_log[];       /* android/log.cpp              */
 extern DynLibFunction symtable_opensles[];  /* android/opensles.cpp         */
@@ -106,13 +107,21 @@ DynLibFunction symtable_android[] = {
 };
 
 /*
- * Every DT_NEEDED entry of libdeadspace.so, without exception: the loader
- * answers all nine itself and never tries to map a dependency out of the APK
- * (an APK does not contain them anyway - on a device they come from the
- * system image).
+ * Every DT_NEEDED entry the loader answers itself instead of mapping.
+ *
+ * libEAMGameDeadSpace.so declares exactly five - libc, libstdc++, libm,
+ * liblog, libGLESv1_CM - and notably not libandroid: this game is not a
+ * NativeActivity. The rest of the list is kept because it costs nothing and
+ * the entries are inert for a module that never names them.
  *
  * libstdc++.so is listed but unused: the game statically links its own C++
  * runtime, and its dynamic table contains no mangled C++ import at all.
+ *
+ * libGLESv1_CM.so is the one that had to be added. so_load_module() walks
+ * DT_NEEDED and treats anything not in this list as another module to map, so
+ * without the entry it goes looking for lib/armeabi-v7a/libGLESv1_CM.so inside
+ * the game tree - which is of course not there, it comes from the system image
+ * on a device - and the load fails before a single relocation is applied.
  */
 const char *so_builtin_libs[] = {
     "libc.so",
@@ -124,6 +133,7 @@ const char *so_builtin_libs[] = {
     "libz.so",
     "libEGL.so",
     "libGLESv2.so",
+    "libGLESv1_CM.so",
     "libOpenSLES.so",
     NULL,
 };
@@ -148,6 +158,11 @@ DynLibFunction *so_dynamic_libraries[] = {
     /* Shadows two entries of symtable_gles2 to read back the compile/link
      * status the game never prints; must therefore come before it. */
     symtable_glprobe,
+    /* Fixed function, and the only GL table this game needs: it imports 190
+     * GLES 1.1 entry points and not one shader call. symtable_gles2 stays in
+     * the list below it because it costs nothing and the two do not overlap -
+     * no name is in both - but every gl* the game asks for is answered here. */
+    symtable_gles1,
     symtable_gles2,
     symtable_opensles,
     symtable_libm,

@@ -152,6 +152,20 @@ uintptr_t so_symbol(so_module *mod, const char *symbol);
 int so_symbol_index(so_module *mod, const char *symbol);
 void so_symbol_fix_ldmia(so_module *mod, const char *symbol);
 
+/*
+ * Called by so_load_module() once per module, after it is relocated and its
+ * imports are bound, and before its initialisers run. A non-zero return aborts
+ * the load and so_load_module() returns NULL.
+ *
+ * This is where the port gets to look at a module that is fully linked but has
+ * not executed a single instruction of its own - the only moment at which "is
+ * every import answered?" can be reported as a list of names instead of as the
+ * address of whichever one a static constructor happened to reach first.
+ *
+ * Defined on a per-port basis alongside the tables below.
+ */
+int so_after_relocate(so_module *mod);
+
 // Defined on a per-port basis on their specific main.c files
 extern DynLibFunction *so_static_patches[];    // Functions to be replaced in the binary
 extern DynLibFunction *so_dynamic_libraries[]; // Functions to be resolved

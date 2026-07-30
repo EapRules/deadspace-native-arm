@@ -388,15 +388,29 @@ so_module *so_load_module(const char *filename, struct zip *apk, void *vm) {
           snprintf(filepath, PATH_MAX, "%s/%s/%s", so_alt_searchpath, get_arch_path().c_str(), current.c_str());
           if (io_load_file(filepath, &buffer, &image_size))
               goto load_module_success;
+
+          // ...and the search path taken literally, with no ABI directory
+          // appended. get_arch_path() derives the directory from the *host*
+          // and so always says "armeabi-v7a" on a 32-bit build; Dead Space is
+          // a 2011 Xperia Play release that ships under lib/armeabi, from
+          // before that split was routine. Rather than teach the loader every
+          // historical ABI folder name, the caller may point the search path
+          // straight at the directory holding the .so.
+          snprintf(filepath, PATH_MAX, "%s/%s", so_alt_searchpath, current.c_str());
+          if (io_load_file(filepath, &buffer, &image_size))
+              goto load_module_success;
       }
 
       snprintf(filepath, PATH_MAX, "lib/%s/%s", get_arch_path().c_str(), current.c_str());
       if (io_load_file(filepath, &buffer, &image_size))
           goto load_module_success;
 
-      if (zip_load_file(apk, filepath, &image_size, &buffer, 0))
+      // Guarded: a game that ships as a directory tree has no archive to fall
+      // back to, and libzip dereferences the handle without checking it.
+      if (apk && zip_load_file(apk, filepath, &image_size, &buffer, 0))
         goto load_module_success;
-      
+
+
       fatal_error("Failed to load module '%s'.\n", current.c_str());
       return NULL;
 
@@ -437,17 +451,36 @@ load_module_success:
       if (mod->was_init)
         continue;
 
-      printf("Linking %s...\n", mod->soname);
+      printf("Linking %s...\n", mod->soname ? mod->soname : "<no DT_SONAME>");
       so_relocate_all(mod);
       so_static_overrides(mod);
       so_flush_caches(mod, 1);
+
+      // Last point at which the port still sees the module with none of its
+      // own code having run. so_initialize() below runs the game's static
+      // constructors - 209 of them in Dead Space - and any one of them that
+      // touches an unbound import faults with nothing but an address to show
+      // for it. Auditing after the fact is auditing after the crash.
+      if (so_after_relocate(mod) != 0)
+        return NULL;
+
       so_initialize(mod);
       jni_resolve_native(mod);
 
-      // And call the JNI_OnLoad method if present
-      auto JNI_OnLoad = (int32_t (*)(void *vm, void *reserved))so_symbol(mod, "JNI_OnLoad");
-      if (JNI_OnLoad != NULL)
-          JNI_OnLoad(vm, NULL);
+      // And call the JNI_OnLoad method if present.
+      //
+      // A NULL vm means "the caller drives JNI_OnLoad itself" and is the only
+      // way to opt out. Dead Space needs that: its boot sequence is
+      // JNI_OnLoad -> audio startup -> NativeOnCreate, in that order, on the
+      // thread that will own the frame loop, and calling the hook from in here
+      // would run it while the module is still half set up - before the import
+      // audit has had a chance to say which shim is missing, so a fault inside
+      // it reports as a bare address instead of as a name.
+      if (vm != NULL) {
+        auto JNI_OnLoad = (int32_t (*)(void *vm, void *reserved))so_symbol(mod, "JNI_OnLoad");
+        if (JNI_OnLoad != NULL)
+            JNI_OnLoad(vm, NULL);
+      }
 
       mod->was_init = 1;
     }

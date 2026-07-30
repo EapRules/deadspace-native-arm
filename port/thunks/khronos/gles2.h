@@ -5,4 +5,7 @@
 
 extern void load_egl_funcs();
 extern void load_gles2_funcs();
+extern void load_gles1_funcs();
+extern const char *gl_provider_name(void);
+extern int gles1_resolved_count(void);
 extern void set_gles2_shader_override_dir(const char* path, bool should_dump);
