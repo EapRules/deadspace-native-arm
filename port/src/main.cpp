@@ -443,8 +443,10 @@ int main(int argc, char **argv)
     /* 0x42424242 is the Vita port's placeholder jobject: the engine stores the
      * pointer and never dereferences it, and a recognisable value makes it
      * obvious in a fault address if that assumption is ever wrong. */
-    if (NativeOnVisibilityChanged)
+    if (NativeOnVisibilityChanged) {
         NativeOnVisibilityChanged(env, (void *)0x42424242, 600, 1);
+        trace("visibility changed");
+    }
 
     /*
      * A bounded run. DEADSPACE_FRAME_LIMIT stops the process after that many
@@ -462,15 +464,30 @@ int main(int argc, char **argv)
                 goto done;
         }
 
+        /* The first frame gets its own line. "surface created" followed by
+         * nothing was ambiguous for several sessions: it could mean the fault
+         * was in NativeOnVisibilityChanged, in the engine's first frame, or in
+         * our own loop before reaching it. Three possibilities, one line to
+         * tell them apart. */
+        if (frames == 0)
+            trace("entering the first NativeOnDrawFrame");
+
         NativeOnDrawFrame();
         frames++;
+
+        if (frames == 1)
+            trace("first frame returned");
 
         if (window)
             SDL_GL_SwapWindow(window);
 
         /* One line per frame would drown the log; the harness reads the last
          * one, so the cadence only has to be fine enough to be current. */
-        if (frames % 10 == 0)
+        /* Dense at the start, sparse after. The harness reads the last
+         * frames= line, so the cadence only has to be current - but a run that
+         * dies at frame 3 used to print nothing at all, which read as "never
+         * drew a frame" when the truth was "drew three". */
+        if (frames <= 5 || frames % 10 == 0)
             trace("frames=%ld", frames);
     }
 
