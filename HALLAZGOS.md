@@ -117,6 +117,44 @@ nuevo: crear la ventana y el contexto, llamar `JNI_OnLoad`, `runEntryPoint`,
 En cierto sentido es **más simple**: el bucle es nuestro, no hay que emular un
 `ALooper` ni una cola de eventos. Pero es código nuevo, no un rename.
 
+### 1.b Las 14 clases Java que hay que falsificar — la lista completa
+
+Esto debió estar en el triage del primer día y no estuvo. El skill lo pide
+explícitamente ("cada clase que aparezca es una clase Java que vas a tener que
+falsificar"), yo conté los 68 símbolos `Java_*` exportados y no hice **la otra**
+lista, que es la que dice cuánto trabajo hay. Resultado: cada clase se descubrió
+de a una, por crash, en vez de tenerlas todas desde el arranque.
+
+```bash
+strings libEAMGameDeadSpace.so | grep -E '^(com/|java/|android/)' | sort -u
+```
+
+Son **14**, y ésa es toda la superficie de JNI del port:
+
+| Clase | Para qué |
+|---|---|
+| `com/ea/EAIO/EAIO` | I/O — `Startup` es nativa, se reenvía al propio juego |
+| `com/ea/blast/MainActivity` | `GetInstance`, `getAssets` |
+| `com/ea/blast/SystemAndroidDelegate` | qué dispositivo dice ser |
+| `com/ea/blast/DisplayAndroidDelegate` | tamaño de pantalla, dpi, orientación |
+| `com/ea/blast/PowerManagerAndroid` | keep-awake |
+| `com/ea/blast/AccelerometerAndroidDelegate` | acelerómetro (no hay) |
+| `com/ea/blast/DeviceOrientationHandlerAndroidDelegate` | rotación (no hay) |
+| `com/ea/blast/TouchSurfaceAndroid` | multi-touch (no hay) |
+| `com/ea/blast/GetAppDataDirectoryDelegate` | dónde escribir |
+| `com/ea/blast/TouchPadAndroidXperiaPlay` | **los touchpads del Xperia Play** |
+| `com/eamobile/Query` | compuerta de "contenido listo" |
+| `java/io/InputStream` | la ruta de assets por JNI |
+| `android/content/res/AssetFileDescriptor` | idem |
+| `android/view/ViewRoot` | superficie de la vista |
+
+`TouchPadAndroidXperiaPlay` merece atención cuando lleguemos a controles: es por
+donde el juego lee los touchpads de la consola para la que fue compilado, y
+probablemente sea el camino natural para mapear los sticks.
+
+**La regla para el próximo port**: enumerar las clases *antes* de escribir código.
+Cuesta un comando y convierte "descubrir por crash" en una lista con tildes.
+
 ### 2. Los assets viven en el filesystem, no en el APK
 
 `data/deadspace/assets/published/`. El juego los abre por ruta, no por

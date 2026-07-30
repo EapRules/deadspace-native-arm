@@ -19,12 +19,33 @@
 
 #include <signal.h>
 #include <string.h>
+#include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
 
 static uintptr_t   g_text_base = 0;
 static size_t      g_text_size = 0;
 static const char *g_soname    = "module";
+
+/*
+ * Only the first thread to fault gets to report.
+ *
+ * This engine runs several threads and they do not fault politely one at a
+ * time. When two go down together, both handlers run concurrently and both
+ * write to fd 2 a few bytes at a time, and the two reports interleave into
+ * something like
+ *
+ *     r0libEAMGameDeadSpace.so = +0x57bc27640x003e7198
+ *
+ * which is not a corrupted register, it is two lines braided together. That
+ * cost an evening: it reads as though the crash handler itself had faulted, so
+ * the real report - the only evidence of where the engine died - looked
+ * untrustworthy when it was simply mixed with another one.
+ *
+ * A later thread is not silenced entirely, because "a second thread also
+ * faulted" is itself worth knowing; it gets one atomic line and then dies.
+ */
+static volatile int g_reporting = 0;
 
 static void put(const char *s)
 {
@@ -120,6 +141,42 @@ static void put_stack(uintptr_t sp)
 static void on_fault(int sig, siginfo_t *si, void *ucontext)
 {
     const ucontext_t *uc = (const ucontext_t *)ucontext;
+
+    /*
+     * __sync_lock_test_and_set rather than a mutex: this is a signal handler
+     * and pthread_mutex_lock is not async-signal-safe. One atomic word is, and
+     * it is all the exclusion needed - the loser never writes again.
+     */
+    if (__sync_lock_test_and_set(&g_reporting, 1)) {
+        put("\nFATAL: a second thread faulted while the first was still "
+            "reporting; its details are omitted so the report above stays "
+            "readable.\n");
+        /*
+         * Wait, do not die.
+         *
+         * The obvious thing here is to restore SIG_DFL and re-raise, and it is
+         * wrong: this thread dies, the process goes with it, and the winner is
+         * killed mid-sentence. The first attempt at this fix produced
+         *
+         *     pc = 0x4f66f384  (libEAMGameDeadSpace.so
+         *
+         * - the report truncated exactly where the other thread pulled the
+         * floor out. So the loser parks instead and lets the winner finish and
+         * take the process down. Bounded, because a winner that never finishes
+         * must not turn a crash into a hang: after two seconds this thread
+         * gives up and dies itself, which at least preserves the exit status.
+         */
+        for (int i = 0; i < 200; i++) {
+            struct timespec ts = { 0, 10 * 1000 * 1000 };  /* 10 ms */
+            nanosleep(&ts, NULL);
+        }
+        struct sigaction dfl2;
+        memset(&dfl2, 0, sizeof(dfl2));
+        dfl2.sa_handler = SIG_DFL;
+        sigaction(sig, &dfl2, NULL);
+        raise(sig);
+        return;
+    }
 
     put("\nFATAL: ");
     put(signal_name(sig));

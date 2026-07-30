@@ -34,6 +34,7 @@ extern DynLibFunction symtable_glprobe[];   /* src/symtab_glprobe.cpp       */
 extern DynLibFunction symtable_unwind[];    /* src/symtab_unwind.cpp        */
 extern DynLibFunction symtable_bionic[];    /* src/symtab_bionic.cpp        */
 extern DynLibFunction symtable_off[];       /* src/symtab_off.cpp           */
+extern DynLibFunction symtable_setjmp[];    /* src/symtab_setjmp.cpp        */
 
 /*
  * libandroid.so — the 42 symbols the game actually imports, implemented in
@@ -157,6 +158,11 @@ DynLibFunction *so_dynamic_libraries[] = {
      * owns. Must come before symtable_libc for the same reason as the mutex
      * bridge above it. */
     symtable_sem,
+    /* bionic's arm jmp_buf is 64 words; glibc's is those 64 plus a
+     * __mask_was_saved flag and a 128-byte signal mask. Bound straight through,
+     * setjmp writes a 1 exactly 256 bytes into a buffer the game sized at 256,
+     * onto whatever field follows. Same reason as the three above it. */
+    symtable_setjmp,
     symtable_stat,
     /* Every libc entry point that takes a *path*. The engine addresses its
      * assets as "appbundle:/..." - a scheme, not a filename - so these have to
