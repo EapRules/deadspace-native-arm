@@ -18,6 +18,7 @@
 #include "crash.h"
 
 #include <signal.h>
+#include <stdint.h>
 #include <string.h>
 #include <time.h>
 #include <ucontext.h>
@@ -109,6 +110,44 @@ static const char *signal_name(int sig)
  * Thumb return addresses have bit 0 set; the offsets are printed with it
  * cleared so they can be pasted straight into objdump --start-address.
  */
+/*
+ * Is this word plausibly a return address, or just data that happens to fall
+ * inside the module?
+ *
+ * The range check alone is not enough, and the reason is a detail of the
+ * loader: text_size is the whole PT_LOAD segment, not just .text, so every
+ * pointer-shaped constant in .rodata and .data passes it. A report full of
+ * those is worse than no report - one run appeared to show an infinite
+ * recursion between two addresses that objdump says are not code at all, and
+ * that cost time to disbelieve.
+ *
+ * A real return address always has a call immediately before it. This game is
+ * ARM throughout - no Thumb in the disassembly - so the four forms that can
+ * precede one are cheap to recognise:
+ *
+ *     BL / BLcond      cond 101 1 <imm24>
+ *     BLX <imm>        1111 101 <H> <imm24>
+ *     BLX <reg>        cond 0001 0010 ... 0011 <Rm>
+ *     ldr pc, [...]    the `mov lr, pc ; ldr pc, [r3]` virtual-call pair this
+ *                      engine uses everywhere, where lr points just past the
+ *                      load
+ *
+ * False positives are still possible - data can encode a valid BL - but they
+ * drop from "most lines" to "rare", which is the difference between a list of
+ * suspects and noise.
+ */
+static bool looks_like_return_address(uintptr_t v)
+{
+    uint32_t prev = *(const uint32_t *)((v & ~(uintptr_t)1) - 4);
+
+    if ((prev & 0x0F000000) == 0x0B000000) return true;  /* BL / BLcond   */
+    if ((prev & 0xFE000000) == 0xFA000000) return true;  /* BLX immediate */
+    if ((prev & 0x0FFFFFF0) == 0x012FFF30) return true;  /* BLX register  */
+    if ((prev & 0x0E10F000) == 0x0410F000) return true;  /* ldr pc, [..]  */
+
+    return false;
+}
+
 static void put_stack(uintptr_t sp)
 {
     if (!sp || !g_text_size)
@@ -124,7 +163,9 @@ static void put_stack(uintptr_t sp)
 
     for (int i = 0; i < max && hits < 24; i++) {
         uintptr_t v = w[i];
-        if (v < g_text_base || v >= g_text_base + g_text_size)
+        if (v < g_text_base + 4 || v >= g_text_base + g_text_size)
+            continue;
+        if (!looks_like_return_address(v))
             continue;
         put("         ");
         put(g_soname);

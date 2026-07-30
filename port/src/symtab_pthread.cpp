@@ -217,8 +217,14 @@ static void delay_late_thread(void)
     if (ms <= 0)
         return;
 
-    trace("delaying the engine's +0x%x thread by %d ms (startup race; see "
-          "DEADSPACE_LATE_THREAD_MS)", LATE_THREAD_OFFSET, ms);
+    /* Deliberately does not name an offset. It used to print
+     * LATE_THREAD_OFFSET, which is the Vita port's hook target and not what is
+     * being delayed here at all - that address never arrives as a pthread
+     * entry. A log line that names the wrong thing is worse than one that names
+     * nothing: the pthread_create trace above already prints the real entry
+     * point, immediately before this. */
+    trace("  ^ delayed %d ms before starting (engine startup race; "
+          "DEADSPACE_LATE_THREAD_MS=0 disables)", ms);
 
     struct timespec ts = { ms / 1000, (long)(ms % 1000) * 1000000L };
     nanosleep(&ts, NULL);
