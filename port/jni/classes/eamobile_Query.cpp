@@ -58,9 +58,42 @@ static jboolean Query_isContentReady(JNIEnv *env, jclass clazz)
     return JNI_TRUE;
 }
 
+/*
+ * The content package version.
+ *
+ * The engine asks for this right after it starts reading published/, and until
+ * now got "Class Query does not have static method getVersion" in the log and a
+ * NULL back. On Android it returns the version of the downloadable content
+ * package; here the content is whatever the user copied to the card and there
+ * is no manifest to read a version out of.
+ *
+ * "1.1.33" is not invented - it is the Xperia Play release this port pins by
+ * sha1 and the harness re-checks on every run. Answering with the version we
+ * actually require is the only answer that stays true: a made-up string would
+ * be a claim about content nobody verified, and an empty one would put the
+ * engine on a "no content installed" path while the content sits right there.
+ */
+static jstring Query_getVersion(JNIEnv *env, jclass clazz)
+{
+    (void)env;
+    (void)clazz;
+
+    /* Built once and kept: DeleteLocalRef is a no-op in this port, so a fresh
+     * String per call would leak one every time. Same reasoning as
+     * SystemAndroidDelegate's property getters. */
+    static String *cached = NULL;
+    if (!cached) {
+        cached = new String("1.1.33");
+        trace("Query.getVersion -> 1.1.33 (the pinned Xperia Play build)");
+    }
+    return (jstring)cached;
+}
+
 const ManagedMethod QueryClassMethods[] = {
     ManagedMethod::RegisterStatic<&Query_isContentReady>(
         Query::clazz, "isContentReady", "()Z"),
+    ManagedMethod::RegisterStatic<&Query_getVersion>(
+        Query::clazz, "getVersion", "()Ljava/lang/String;"),
     {NULL},
 };
 

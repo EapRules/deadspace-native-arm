@@ -43,9 +43,16 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <time.h>
+#include "trace.h"
 #include "so_util.h"
 #include "thunk_gen.h"
 #include "thunk_pthread.h"
+
+/* Defined in src/main.cpp, with C++ linkage - so declared outside the
+ * extern "C" block below or the two would not be the same symbol. */
+struct so_module;
+extern so_module *deadspace_module(void);
 
 extern "C" {
 
@@ -154,9 +161,89 @@ int bionic_pthread_attr_setguardsize(struct bionic_pthread_attr *attr, uint32_t 
  * to fit in that budget, so the host default is used unless the game asked
  * for more.
  */
+/*
+ * One thread in this engine has to start late, and this is where that is done.
+ *
+ * The symptom is the one that is hardest to act on: the run faults in a
+ * *different place each time*. Two crash sites alternated across otherwise
+ * identical runs - +0x30a744 on the main stack, +0x5f384 on another - and a fix
+ * for one would appear to work and then stop working, because what actually
+ * changed between runs was thread scheduling, not the fix.
+ *
+ * The Vita port hit the same thing and its patch.c hooks the entry trampoline
+ * at +0x320624 to sleep before running, with the comment "a thread that causes
+ * some kind of undefined behaviour and crashes in different places if not
+ * delayed". That trampoline is four instructions -
+ *
+ *     push {r4, lr} ; ldr r3,[r0] ; mov lr,pc ; ldr pc,[r3] ; mov r0,#0
+ *
+ * - a C++ thread object's start routine: call virtual method zero on the
+ * argument, return 0. Which means it does not need a binary hook at all. It
+ * arrives here as the `entry` argument of pthread_create, so recognising it by
+ * address and delaying the *creation* has the same effect with none of the
+ * trampoline machinery, and stays visible in a stack trace.
+ *
+ * This is a workaround and it is worth being plain about that: the underlying
+ * defect is a startup race inside the engine that nobody has diagnosed, on
+ * either platform. Delaying makes it lose the race reliably instead of
+ * sometimes. DEADSPACE_LATE_THREAD_MS exists so the next person can find out
+ * how much margin there really is without rebuilding, and setting it to 0 turns
+ * the workaround off to check whether it is still needed.
+ */
+#define LATE_THREAD_OFFSET 0x320624
+
+static bool is_late_thread(void *(*entry)(void *))
+{
+    so_module *mod = deadspace_module();
+    if (!mod || !entry)
+        return false;
+
+    /* Which entry point, by module-relative offset. Empty means "every thread
+     * the engine starts", which is the setting to reach for when narrowing
+     * down whether a race exists at all before finding out whose it is. */
+    const char *want = getenv("DEADSPACE_LATE_THREAD_AT");
+    if (!want || !*want)
+        return (uintptr_t)entry >= mod->text_base &&
+               (uintptr_t)entry <  mod->text_base + mod->text_size;
+
+    unsigned long off = strtoul(want, NULL, 0);
+    return (uintptr_t)entry == mod->text_base + off;
+}
+
+static void delay_late_thread(void)
+{
+    const char *env = getenv("DEADSPACE_LATE_THREAD_MS");
+    int ms = env ? atoi(env) : 1500;
+    if (ms <= 0)
+        return;
+
+    trace("delaying the engine's +0x%x thread by %d ms (startup race; see "
+          "DEADSPACE_LATE_THREAD_MS)", LATE_THREAD_OFFSET, ms);
+
+    struct timespec ts = { ms / 1000, (long)(ms % 1000) * 1000000L };
+    nanosleep(&ts, NULL);
+}
+
 int bionic_pthread_create(pthread_t *thread, const struct bionic_pthread_attr *attr,
                           void *(*entry)(void *), void *arg)
 {
+    /* Name every thread the engine starts, module-relative. Guessing which
+     * entry point matters is what wasted the first attempt at the delay below:
+     * the trampoline the Vita port hooks never arrives here, and one line per
+     * creation says so in a single run instead of a session of disassembly. */
+    {
+        so_module *mod = deadspace_module();
+        if (mod && (uintptr_t)entry >= mod->text_base &&
+            (uintptr_t)entry <  mod->text_base + mod->text_size)
+            trace("pthread_create: entry at +0x%08x, arg=%p",
+                  (unsigned)((uintptr_t)entry - mod->text_base), arg);
+        else
+            trace("pthread_create: entry at %p (outside the module)", (void *)entry);
+    }
+
+    if (is_late_thread(entry))
+        delay_late_thread();
+
     if (!attr)
         return pthread_create(thread, NULL, entry, arg);
 
