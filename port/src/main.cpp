@@ -469,14 +469,17 @@ int main(int argc, char **argv)
          * was in NativeOnVisibilityChanged, in the engine's first frame, or in
          * our own loop before reaching it. Three possibilities, one line to
          * tell them apart. */
-        if (frames == 0)
-            trace("entering the first NativeOnDrawFrame");
+        /* Entering *and* returning, for the first few. "frames=1" as the last
+         * line cannot distinguish "the second frame never started" from "the
+         * second frame never came back", and those are different bugs. */
+        if (frames < 5)
+            trace("-> NativeOnDrawFrame #%ld", frames + 1);
 
         NativeOnDrawFrame();
         frames++;
 
-        if (frames == 1)
-            trace("first frame returned");
+        if (frames <= 5)
+            trace("<- NativeOnDrawFrame #%ld returned", frames);
 
         if (window)
             SDL_GL_SwapWindow(window);
