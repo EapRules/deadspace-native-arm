@@ -32,6 +32,7 @@
 #include <SDL2/SDL.h>
 
 #include "khronos/glad.h"
+#include "atc_decompress.h"
 #include "third_party/powervr/PVRTDecompress.h"
 
 #include "gl_diag.h"
@@ -206,6 +207,76 @@ static bool driver_supports_pvrtc(void)
     return supported != 0;
 }
 
+static bool driver_supports_atc(void)
+{
+    static int supported = -1;
+    if (supported >= 0)
+        return supported != 0;
+
+    using GetString = const GLubyte *(*)(GLenum);
+    GetString get_string =
+        (GetString)SDL_GL_GetProcAddress("glGetString");
+    const char *extensions = get_string
+        ? (const char *)get_string(GL_EXTENSIONS) : NULL;
+    supported = extension_present(
+        extensions, "GL_AMD_compressed_ATC_texture") ? 1 : 0;
+    trace("ATC: native driver support %s; software fallback %s",
+          supported ? "present" : "absent",
+          supported ? "disabled" : "enabled");
+    return supported != 0;
+}
+
+static bool atc_format(GLenum format, bool *explicit_alpha)
+{
+    switch (format) {
+    case GL_ATC_RGB_AMD:
+        *explicit_alpha = false;
+        return true;
+    case GL_ATC_RGBA_EXPLICIT_ALPHA_AMD:
+        *explicit_alpha = true;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool decode_atc(GLenum format, GLsizei width, GLsizei height,
+                       GLsizei image_size, const void *data,
+                       std::vector<unsigned char> *rgba)
+{
+    bool explicit_alpha = false;
+    if (!atc_format(format, &explicit_alpha) || width <= 0 || height <= 0 ||
+        image_size < 0 || !data)
+        return false;
+
+    const std::size_t blocks_x = (static_cast<std::size_t>(width) + 3) / 4;
+    const std::size_t blocks_y = (static_cast<std::size_t>(height) + 3) / 4;
+    const std::size_t bytes_per_block = explicit_alpha ? 16u : 8u;
+    if (blocks_x > SIZE_MAX / blocks_y ||
+        blocks_x * blocks_y > static_cast<std::size_t>(image_size) /
+                                  bytes_per_block)
+        return false;
+
+    const std::size_t decoded_size = static_cast<std::size_t>(width) *
+                                     static_cast<std::size_t>(height) * 4u;
+    try {
+        rgba->resize(decoded_size);
+    } catch (const std::bad_alloc &) {
+        trace("ATC: cannot allocate %llu-byte decode buffer",
+              (unsigned long long)decoded_size);
+        return false;
+    }
+
+    const bool ok = explicit_alpha
+        ? atc::decode_rgba_explicit(data, static_cast<std::size_t>(image_size),
+                                    width, height, rgba->data())
+        : atc::decode_rgb(data, static_cast<std::size_t>(image_size),
+                          width, height, rgba->data());
+    if (!ok)
+        rgba->clear();
+    return ok;
+}
+
 static bool pvrtc_format(GLenum format, bool *two_bpp, bool *opaque)
 {
     switch (format) {
@@ -285,6 +356,29 @@ extern "C" void probe_glCompressedTexImage2D(
                   target, level, internalformat, width, height, border,
                   image_size, data);
         }
+    }
+
+    bool known_atc = false, ignored_explicit_alpha = false;
+    known_atc = atc_format(internalformat, &ignored_explicit_alpha);
+    if (known_atc && !driver_supports_atc() && upload) {
+        std::vector<unsigned char> rgba;
+        if (decode_atc(internalformat, width, height, image_size, data,
+                       &rgba)) {
+            upload(target, level, GL_RGBA, width, height, border,
+                   GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+            if (fallback_lines++ < 16) {
+                trace("ATC: decoded level=%d format=0x%04x %dx%d "
+                      "(%d compressed bytes -> %zu RGBA bytes)",
+                      level, internalformat, width, height, image_size,
+                      rgba.size());
+            }
+            if (gl_diag_enabled())
+                gl_diag_after("ATC fallback glTexImage2D");
+            return;
+        }
+        trace("ATC: invalid upload; forwarding to driver for GL error "
+              "(level=%d format=0x%04x %dx%d bytes=%d)",
+              level, internalformat, width, height, image_size);
     }
 
     bool known_pvrtc = false, ignored_two_bpp = false, ignored_opaque = false;
