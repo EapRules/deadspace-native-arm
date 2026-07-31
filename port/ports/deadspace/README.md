@@ -16,8 +16,10 @@ The immutable headless verifier reaches **M7/7**:
 - a non-black framebuffer;
 - synthetic JNI keys causing at least two measured scene changes.
 
-Real R36S/Mali, audio, save data and a complete play-through still require
-device testing.
+Real R36S testing confirms centred 640x480 output, a working menu cursor and
+working pad input. The remaining device issues are mostly-white/broken 3D
+materials on Mali and no audio. Save data and a complete play-through still
+require testing.
 
 ## Your game files
 

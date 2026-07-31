@@ -289,6 +289,44 @@ Corrida final del árbitro de solo lectura `port/harness/verify.sh`:
 [verify] === milestone reached: 7 / 7 ===
 ```
 
+### 11.11 Tercer ensayo: pantalla/input resueltos, render 3D roto
+
+Resultado informado por el usuario con la build `d4ca229` en la R36S:
+
+- la imagen ahora ocupa correctamente la pantalla y está centrada;
+- el cursor software aparece y la cruceta lo mueve;
+- A/Start permiten avanzar y los pads responden;
+- los menús y sus botones se ven;
+- el cursor actual es una cruz funcional pero visualmente provisoria, y puede
+  desaparecer al pasar entre cursor y controles de gameplay;
+- el contenido 3D está roto: fondos y objetos/personajes aparecen casi
+  completamente blancos, a veces sólo se distingue una línea, borde, sombra o
+  silueta;
+- el audio no funciona.
+
+Esto confirma en hardware real las dos correcciones del ensayo anterior:
+orientación natural 480x640 → viewport físico 640x480, y menús táctiles
+operables mediante cursor. También separa el próximo problema: ya no es
+geometría de ventana ni falta de input; es el camino de render de materiales,
+texturas, iluminación o estado GLES1 sobre Mali.
+
+La UI visible con el mundo 3D blanco acota la investigación. El proceso no
+está simplemente presentando un framebuffer vacío, y el motor sí carga assets,
+sube texturas y emite draws. Hay que comparar estado y errores GL entre qemu y
+el driver Mali real, especialmente formatos de textura/extensiones y las
+llamadas de fixed-function que afectan textura, color, iluminación, blending y
+matrices.
+
+El audio se deja deliberadamente para el final. Ya estaba documentada una
+divergencia ARM importante en ese bloque: el binario usa short vectors VFP que
+qemu emula y el Cortex-A35 de la R36S trata como RAZ/WI. No mezclar esa deuda
+con el fallo visual evita abrir dos frentes de bajo nivel a la vez.
+
+Para reducir las iteraciones físicas de copiar/expulsar/reinsertar la SD, el
+próximo paso es convertir el harness gráfico en una ejecución local
+interactiva y controlable, con capturas y logs automatizados, y exponer esas
+operaciones mediante un MCP específico del port.
+
 El harness no fue modificado. También se ejecutó un dry-run del launcher en un
 contenedor PortMaster descartable, quitando del sistema las bibliotecas que el
 paquete afirma transportar; pasó carga del módulo, resumen final, limpieza de

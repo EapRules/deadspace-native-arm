@@ -119,6 +119,20 @@ either analog stick dismisses it so the same controls can drive gameplay.
 The pointer callback uses base AAPCS because the game is softfp and the loader
 is hardfp.
 
+## Real-device status
+
+The `d4ca229` build was tested on an R36S with its Mali-G31 driver:
+
+- the image is correctly centred at 640x480;
+- the D-pad cursor and physical controls work and can advance through menus;
+- menu UI is visible;
+- 3D characters, objects and backgrounds render mostly white, sometimes with
+  only an edge, shadow or silhouette visible;
+- audio is not working yet.
+
+The next graphics milestone is therefore correct GLES1 material/texturing on
+Mali, not window geometry or input. Audio remains intentionally deferred.
+
 ## Diagnostics
 
 Every device launch writes `ports/deadspace/log.txt`. Important lines:
