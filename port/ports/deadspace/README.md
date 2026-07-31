@@ -1,100 +1,160 @@
-# Dead Space — PortMaster test build
+# Dead Space Mobile — native PortMaster port
 
-This runs the original Android ARM library directly on Linux/ARM. It is the
-2011 EA/Visceral Dead Space mobile game, using the **Xperia Play v1.1.33**
-binary. It is not an emulator and it is not the unrelated Mountain Sheep game
-that an early scaffold in this repository described.
+Runs the 2011 **Dead Space Mobile** game by IronMonkey Studios natively on the
+R36S and similar Linux/ARM handhelds. There is no Android runtime and no
+emulator: the original ARM game library is loaded directly through a
+bionic/JNI compatibility layer.
 
-## Status
+> **Bring your own game.** The release contains no EA game binary or asset.
+> Supply a copy you own; nothing is downloaded and no protection is bypassed.
 
-The immutable headless verifier reaches **M7/7**:
+## Required game version
 
-- 570 frames without a crash in the latest run;
-- 84 successful content opens;
-- 151 texture uploads;
-- 35,049 draw calls;
-- a non-black framebuffer;
-- synthetic JNI keys causing three measured scene changes.
-
-Real R36S testing confirms centred 640x480 output, a working menu cursor and
-working pad input. The white 3D scene was traced to PVRTC textures unsupported
-by Mali-G31. This build decodes them to RGBA8888 in software; the corrected
-3D scene is now confirmed on the real R36S. This candidate also replaces the
-cross cursor with an arrow, restores it with L3/R3 or Start, sustains camera
-movement while the right stick is held and repairs the previously unopened
-SDL audio path. Audio, these new input changes, save data and a complete
-play-through still require testing on the device.
-
-## Your game files
-
-No game binary or asset ships with this port. Extract your own Xperia Play
-v1.1.33 copy and place these inside `ports/deadspace/`:
+The supported donor is **Dead Space Mobile for Xperia Play v1.1.33**:
 
 ```text
-deadspace/
-├── assets/
-│   ├── EAMCore.ini
-│   └── published/
-└── lib/
-    └── armeabi/
-        └── libEAMGameDeadSpace.so
+Android package: com.eamobile.deadspace_sonyericsson
+Library:         lib/armeabi/libEAMGameDeadSpace.so
+SHA1:            0ed42b611415015807f759ec9b5457857143ce39
 ```
 
-The supported native library SHA1 is:
+Backups of this release are sometimes labelled **Dead Space Mobile Version
+1.1.33** or **dead space vita 1.1.33**. The label and filename are not trusted:
+the first-boot extractor accepts the donor only when its contents and native
+library match the supported build.
+
+## Install with PortMaster autoinstall
+
+Do not manually unzip the port release into `ports/`. Let PortMaster install
+it so the executable bit and EmulationStation entry are created correctly.
+
+1. Put the release file **`deadspace.zip`** in PortMaster's `autoinstall/`
+   directory:
+
+   | CFW | Autoinstall directory |
+   |---|---|
+   | ArkOS, dArkOS | `/roms/tools/PortMaster/autoinstall/` |
+   | AmberELEC, ROCKNIX, JELOS, uOS | `/roms/ports/PortMaster/autoinstall/` |
+   | muOS | `/mmc/MUOS/PortMaster/autoinstall/` |
+   | Knulli | `/userdata/system/.local/share/PortMaster/autoinstall/` |
+
+2. On the same SD card, create `ports/deadspace/` and put your donor there.
+   It may be an APK, a ZIP, or a folder already extracted from an APK/7z. The
+   filename does not matter.
+
+   For APK or ZIP input:
+
+   ```text
+   ports/deadspace/my-dead-space-copy.zip
+   ```
+
+   If your source is a 7z, extract it on the computer first and use:
+
+   ```text
+   ports/deadspace/gamedata/donor/
+   ├── assets/
+   └── lib/armeabi/libEAMGameDeadSpace.so
+   ```
+
+   The port ZIP and a donor ZIP can both originally be named `deadspace.zip`;
+   they go in different directories. Rename the donor if that makes the copy
+   easier to follow.
+
+3. Put the card back in the console and open PortMaster. It finds the release
+   in `autoinstall/`, installs it and adds the menu metadata.
+
+4. Close PortMaster and **reboot the console**. Autoinstall does not refresh
+   the Ports list that EmulationStation loaded at boot.
+
+5. Launch Dead Space from Ports. The first launch discovers the donor by
+   content, extracts roughly 303 MiB into a temporary stage, validates every
+   required output and publishes it atomically. Keep at least 500 MiB free and
+   do not power off during this first extraction. Later launches start
+   normally. Once the game has launched successfully, the original donor file
+   is no longer required by the port.
+
+The importer accepts these layouts without requiring the user to rearrange
+them:
 
 ```text
-0ed42b611415015807f759ec9b5457857143ce39
+assets/... + lib/armeabi/...
+deadspace/assets/... + deadspace/lib/armeabi/...
+data/deadspace/assets/... + data/deadspace/lib/armeabi/...
+NeededFiles/data/deadspace/assets/... + NeededFiles/data/deadspace/lib/armeabi/...
 ```
 
-The launcher checks it before starting because the loader contains
-build-specific patches.
+### Two autoinstall gotchas
+
+- The game does not appear in Ports until the console is rebooted.
+- Do not use **Reinstall** or **Uninstall** under Manage Ports. This independent
+  release is not in PortMaster's catalogue, so those actions try to download a
+  source that does not exist there and may remove the installed folder,
+  including the user's donor and extracted data. To update, put the new release
+  ZIP in `autoinstall/` again.
+
+A harmless “No internet connection” message may appear after installation
+while PortMaster refreshes its own catalogue. The port and its screenshot are
+already inside the ZIP.
 
 ## Controls
 
-The loader uses the game's exported JNI input functions, matching the working
-Vita port:
+The original menus are touch-only. The port supplies a software pointer and
+turns the handheld controls into the same touch/key events used by the game.
 
-| R36S control | Android/game input |
+| R36S control | Action |
 |---|---|
-| D-pad | Move visible cursor while it is shown |
-| A | Touch/click at cursor; game A when cursor is hidden |
+| D-pad | Move the menu pointer |
+| A | Tap/click at the pointer; game A when the pointer is hidden |
 | B | Back |
 | X / Y | Xperia Play X / Y |
 | L1 / R1 | Shoulder buttons |
-| Start | Start |
-| Select | Select |
-| L3 / R3 | Show/hide menu cursor |
-| Left stick | Virtual touchscreen movement stick |
-| Right stick | Virtual touchpad aiming stick |
+| Start | Pause/menu and restore the pointer |
+| L3 / R3 | Show or hide the pointer |
+| Left stick | Walk through the virtual movement stick |
+| Right stick | Continuous camera/aim through the virtual touchpad |
 
-Dead Space's menus are touch-only even in the working Vita port. The cursor
-starts at the centre of the title screen. Move it with the D-pad and press A
-to tap. Moving either analog stick hides it for gameplay; press L3 or R3 to
-bring it back. Start also restores it while opening the pause menu. The right
-stick is translated into a fresh touchpad camera gesture every frame so a held
-direction keeps turning continuously.
+Moving either analogue stick hides the pointer for gameplay. Press L3, R3 or
+Start to recover it for a menu.
 
-`deadspace.gptk` intentionally leaves game buttons unbound. It runs only so
-PortMaster's standard exit combination can terminate the process.
+## Requirements and current testing
 
-## Diagnostics
+- armhf execution and 32-bit GPU libraries, like box86/GMLoader ports;
+- two analogue sticks;
+- glibc 2.38 or newer;
+- about 500 MiB free for first-boot extraction.
 
-Every launch replaces `ports/deadspace/log.txt`. Useful lines include:
+Tested on an R36S (RK3326/Mali-G31) with dArkOSRE at 640x480. Centred output,
+the PVRTC software fallback, the complete 3D menu scene and pad input are
+confirmed on that device. The release includes the later pointer-recovery,
+continuous-camera and audio/VFP fixes; reports from other firmware and a full
+play-through are welcome.
 
-- `TRACE: module loaded`
-- `TRACE: mounted extracted content at /published`
-- `TRACE: VFP short vectors: expanded 40/40 audio instructions`
-- `TRACE: AudioTrack: SDL audio ready driver=...`
-- `TRACE: AudioTrack: opened device=...`
-- `TRACE: AudioTrack: PCM write=...`
-- `TRACE: framebuffer non-black`
-- `FATAL:` followed by registers and module-relative addresses
+## Troubleshooting
 
-If the launcher rejects the game files, confirm both the directory layout and
-the SHA1 above.
+Each launch replaces `ports/deadspace/log.txt`. First-boot extraction writes
+`ports/deadspace/eapx.log` separately. If installation fails, include both
+files plus the device/CFW when reporting it.
 
-## Legal
+Common causes:
 
-This package contains only the loader, compatibility code and required
-redistributable libraries. Supply game files from your own copy. Do not
-redistribute `libEAMGameDeadSpace.so` or the extracted assets.
+- `no game package was found`: donor is not inside `ports/deadspace/` or its
+  `gamedata/` child;
+- `no input matches this recipe`: wrong release or incomplete archive;
+- `sha256 ... not in the accepted list`: native library is not Xperia Play
+  v1.1.33;
+- `GL: no compatible 32-bit Mali blob found`: the firmware lacks the required
+  armhf GPU userspace.
+
+## Credits and licence
+
+Game by **IronMonkey Studios**, published by **Electronic Arts**. Port by
+**EapRules**.
+
+The bionic ELF loader and JNI/libc compatibility work derive from
+[gmloader-next](https://github.com/JohnnyonFlame/gmloader-next), itself based on
+Andy Nguyen's Vita so-loader. PVRTC decoding comes from Imagination
+Technologies' PowerVR SDK, and the ARMv8 short-vector expansion is adapted from
+Bythos14's VFPVector.
+
+The port is GPL-3.0. Exact notices and the copyright terms for every bundled
+shared library are shipped under `licenses/`.

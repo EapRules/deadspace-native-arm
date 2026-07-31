@@ -16,7 +16,13 @@ the licences differ and the originals must keep their attribution.
 | `loader/leb128.h` | Free Software Foundation (binutils) | GPL |
 | `thunks/khronos/` | glad generator, Khronos headers | MIT / Apache-2.0 |
 | `third_party/powervr/PVRTDecompress.*` | [PowerVR SDK](https://github.com/powervr-graphics/Native_SDK) by Imagination Technologies | MIT |
+| `src/vfp_vector_patch.cpp` register decoding/scalar emission | adapted from VFPVector by **Bythos14** | MIT |
+| `tools/eapx.py` — transactional first-boot donor extractor | written by **EapRules** | GPL-3.0 |
 | `android/`, `jni/classes/xt_*`, `src/`, `harness/`, `ports/` | written for this port | GPL-3.0 |
+
+The ARM shared libraries under `libs.armhf/` are copied from Debian armhf
+packages by `tools/collect_libs.sh`. The release includes the exact Debian
+copyright file for every bundled SONAME under `licenses/libraries/`.
 
 ## Note on the GPL version
 
@@ -36,12 +42,12 @@ repository will relicense to match — open an issue and it will be corrected.
 ## What is *not* in here
 
 No game code, assets, or data from Dead Space are distributed by this project.
-The supported binary is EA/Visceral's Xperia Play release; you supply your own
-copy. The port loads it at runtime and circumvents no protection.
+The supported binary is EA/IronMonkey's Xperia Play release; you supply your
+own copy. The port loads it at runtime and circumvents no protection.
 
-The cover image and the optional 4:3 splash under `ports/deadspace/` are
-promotional artwork belonging to their respective rights holders, included
-only to identify the game in the PortMaster menu the way every other PortMaster
-entry does. They are not game content and are not required for the port to run
-— delete them and it still works. If a rights holder would rather they were not
-distributed, open an issue and they come out.
+The 4:3 screenshot under `ports/deadspace/` was captured from the user's own
+copy through this loader. The 4:3 cover is an original promotional composition
+created for this port from user-directed/generated artwork and a gameplay
+scene. Both are included only to identify the game in the PortMaster menu and
+are not required for the port to run. If a rights holder would rather they
+were not distributed, open an issue and they come out.

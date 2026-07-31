@@ -60,6 +60,69 @@ show_screen() {
 }
 
 GAME_SO="$GAMEDIR/lib/armeabi/libEAMGameDeadSpace.so"
+
+# A release user should not have to unpack an Android package by hand. eapx
+# discovers APK/ZIP/folder donors by their contents, stages the complete game
+# tree away from the live install, validates the exact native library and only
+# then publishes assets/ and lib/. Existing manually-extracted installs skip
+# this path and continue to work exactly as before.
+if [ ! -f "$GAME_SO" ] || [ ! -f "$GAMEDIR/assets/EAMCore.ini" ] \
+   || [ ! -d "$GAMEDIR/assets/published" ]; then
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "Game-data import failed: python3 is unavailable"
+    show_screen 12 <<EOF
+
+  Dead Space - Python 3 missing
+
+  Automatic game-data import needs
+  Python 3 from the CFW.
+
+  Update PortMaster/your firmware, or
+  extract the donor on a computer into:
+    ports/deadspace/
+
+EOF
+    pm_finish
+    exit 1
+  fi
+
+  if [ ! -f "$GAMEDIR/eapx.py" ] || [ ! -f "$GAMEDIR/deadspace.eapx.json" ]; then
+    echo "Game-data import failed: eapx runtime or recipe is missing"
+    show_screen 12 <<EOF
+
+  Dead Space - incomplete port
+
+  eapx.py or deadspace.eapx.json
+  is missing. Reinstall the release ZIP
+  through PortMaster/autoinstall.
+
+EOF
+    pm_finish
+    exit 1
+  fi
+
+  echo "Game data is absent; starting content-based first-boot import"
+  if ! python3 "$GAMEDIR/eapx.py" install \
+       --recipe "$GAMEDIR/deadspace.eapx.json" \
+       --game-dir "$GAMEDIR" --tty "$CUR_TTY"; then
+    echo "Game-data import failed; see $GAMEDIR/eapx.log"
+    show_screen 15 <<EOF
+
+  Dead Space - game data not ready
+
+  Put your own Xperia Play v1.1.33
+  APK, ZIP, or extracted folder in:
+    ports/deadspace/
+
+  The filename does not matter.
+  See README.md and eapx.log.
+
+EOF
+    pm_finish
+    exit 1
+  fi
+fi
+
 if [ ! -f "$GAME_SO" ] || [ ! -f "$GAMEDIR/assets/EAMCore.ini" ] \
    || [ ! -d "$GAMEDIR/assets/published" ]; then
   echo "Game-data check failed: extracted Xperia Play files are incomplete."
@@ -67,7 +130,7 @@ if [ ! -f "$GAME_SO" ] || [ ! -f "$GAMEDIR/assets/EAMCore.ini" ] \
 
   Dead Space - missing game data
 
-  Copy your extracted Android game into:
+  Put your APK, ZIP or extracted game in:
     ports/deadspace/
 
   Required:
@@ -82,6 +145,8 @@ EOF
   pm_finish
   exit 1
 fi
+
+rm -f "$GAMEDIR/PUT_DEAD_SPACE_DATA_HERE.txt"
 
 # The loader patches fixed offsets, so accepting a different binary would turn
 # a useful "wrong build" message into a crash deep inside startup.

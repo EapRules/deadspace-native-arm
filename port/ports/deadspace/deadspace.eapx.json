@@ -1,0 +1,132 @@
+{
+  "schema": 1,
+  "id": "deadspace-xperia-1.1.33",
+  "version": "1",
+  "title": "DEAD SPACE",
+  "abi_order": [
+    "armeabi"
+  ],
+  "input": {
+    "search_dirs": [
+      "gamedata",
+      "."
+    ]
+  },
+  "extract": [
+    {
+      "id": "native-library",
+      "description": "Xperia Play v1.1.33 native library",
+      "destination": "lib/armeabi/libEAMGameDeadSpace.so",
+      "source": {
+        "kind": "entry",
+        "patterns": [
+          "lib/armeabi/libEAMGameDeadSpace.so",
+          "deadspace/lib/armeabi/libEAMGameDeadSpace.so",
+          "data/deadspace/lib/armeabi/libEAMGameDeadSpace.so",
+          "NeededFiles/data/deadspace/lib/armeabi/libEAMGameDeadSpace.so"
+        ]
+      },
+      "validate": {
+        "size": 4499468,
+        "sha256": "1ff0a34a2ef35f50c0031b383d8fd7b14369dca0f41969c5d4da8fabe569ed38",
+        "elf_machine": "armeabi"
+      }
+    },
+    {
+      "id": "assets-apk",
+      "description": "game assets at the Android package root",
+      "required": false,
+      "destination": "assets",
+      "source": {
+        "kind": "entries",
+        "patterns": [
+          "assets/*"
+        ],
+        "strip_prefix": "assets/"
+      },
+      "validate": {
+        "min_files": 1700,
+        "min_bytes": 300000000
+      }
+    },
+    {
+      "id": "assets-deadspace",
+      "description": "game assets under a deadspace directory",
+      "required": false,
+      "destination": "assets",
+      "source": {
+        "kind": "entries",
+        "patterns": [
+          "deadspace/assets/*"
+        ],
+        "strip_prefix": "deadspace/assets/"
+      },
+      "validate": {
+        "min_files": 1700,
+        "min_bytes": 300000000
+      }
+    },
+    {
+      "id": "assets-data-deadspace",
+      "description": "game assets under data/deadspace",
+      "required": false,
+      "destination": "assets",
+      "source": {
+        "kind": "entries",
+        "patterns": [
+          "data/deadspace/assets/*"
+        ],
+        "strip_prefix": "data/deadspace/assets/"
+      },
+      "validate": {
+        "min_files": 1700,
+        "min_bytes": 300000000
+      }
+    },
+    {
+      "id": "assets-neededfiles",
+      "description": "game assets under NeededFiles/data/deadspace",
+      "required": false,
+      "destination": "assets",
+      "source": {
+        "kind": "entries",
+        "patterns": [
+          "NeededFiles/data/deadspace/assets/*"
+        ],
+        "strip_prefix": "NeededFiles/data/deadspace/assets/"
+      },
+      "validate": {
+        "min_files": 1700,
+        "min_bytes": 300000000
+      }
+    }
+  ],
+  "validate": [
+    {
+      "path": "lib/armeabi/libEAMGameDeadSpace.so",
+      "size": 4499468,
+      "sha256": "1ff0a34a2ef35f50c0031b383d8fd7b14369dca0f41969c5d4da8fabe569ed38",
+      "elf_machine": "armeabi"
+    },
+    {
+      "path": "assets/EAMCore.ini",
+      "size": 3119,
+      "sha256": "d5b49184291c9a56928481380e19e8ead7f2df7b031201ffad52d8f374e05335"
+    },
+    {
+      "path": "assets/published",
+      "min_files": 1700,
+      "min_bytes": 300000000
+    }
+  ],
+  "commit": [
+    "assets",
+    "lib"
+  ],
+  "marker": ".eapx-deadspace-data.json",
+  "log": "eapx.log",
+  "placeholder": "PUT_DEAD_SPACE_DATA_HERE.txt",
+  "space": {
+    "safety_bytes": 67108864
+  }
+}

@@ -28,11 +28,11 @@
 # one). Everything else is the port as it will ship.
 #
 # Usage (from the repo root, on the host):
-#   docker run --rm -v "$PWD":/src -v "$(dirname APK)":/apk:ro -w /src \
-#       deadspace-build tools/dryrun_port.sh /apk/deadspace_play.apk
+#   docker run --rm -v "$PWD":/src -v "/path/to/donor":/game:ro -w /src \
+#       deadspace-build tools/dryrun_port.sh /game
 set -uo pipefail
 
-APK="${1:?usage: dryrun_port.sh <path to deadspace apk>}"
+DONOR="${1:?usage: dryrun_port.sh <path to Dead Space APK, ZIP or extracted tree>}"
 ROOT=/tmp/dryrun
 PM="$ROOT/home/.local/share/PortMaster"
 GAMEDIR="/roms/ports/deadspace"
@@ -77,7 +77,11 @@ chmod +x "$ROOT/gptokeyb"
 # --- install the port the way the zip would --------------------------------
 cp "build/deadspace"                  "$GAMEDIR/deadspace"
 cp "ports/deadspace/deadspace.gptk"   "$GAMEDIR/deadspace.gptk"
+cp "ports/deadspace/deadspace.eapx.json" "$GAMEDIR/deadspace.eapx.json"
+cp "tools/eapx.py"                    "$GAMEDIR/eapx.py"
 cp "ports/Dead Space.sh"              "/roms/ports/Dead Space.sh"
+mkdir -p "$GAMEDIR/gamedata"
+cp -R "$DONOR" "$GAMEDIR/gamedata/donor"
 
 if [ ! -f "build/libs.armhf/MANIFEST.txt" ]; then
     echo "[dryrun] build/libs.armhf is not there — run 'make libs' first." >&2
@@ -200,8 +204,8 @@ for d in $ARMHF_DIRS; do
     done
 done
 echo "[dryrun] moved $MOVED armhf libraries out of the system; what is left is glibc, SDL2 and the GL stack — which is what the console has"
-# The APK is the user's own copy; the launcher expects it under this name.
-ln -sf "$APK" "$GAMEDIR/deadspace.apk"
+# The donor is the user's own copy. It deliberately has a meaningless name:
+# eapx must identify it by content, not because a test handed it a hint.
 chmod -x "$GAMEDIR/deadspace"   # prove the launcher's chmod +x is doing work
 
 # --- run it ----------------------------------------------------------------
@@ -241,11 +245,15 @@ check "libs.armhf covers every non-system library" test -z "$MISSING"
 # Guard the guard: if nothing was moved, the run above proved nothing about
 # libs.armhf, because the system copies were still there to be found.
 check "system copies of the bundled libs removed"  test "$MOVED" -gt 0
-check_not "libzip reachable outside the port"      test -e /usr/lib/arm-linux-gnueabihf/libzip.so.5
+check_not "system libzip absent; no accidental fallback" test -e /usr/lib/arm-linux-gnueabihf/libzip.so.5
 
 LOG="$GAMEDIR/log.txt"
 check "log.txt written by the launcher"          test -s "$LOG"
-check "DEADSPACE_DATA_DIR created"                test -d "$GAMEDIR/gamedata"
+check "writable var directory created"            test -d "$GAMEDIR/var"
+check "eapx marker written"                       test -f "$GAMEDIR/.eapx-deadspace-data.json"
+check "eapx import log written"                   test -s "$GAMEDIR/eapx.log"
+check "donor native library imported"             test -f "$GAMEDIR/lib/armeabi/libEAMGameDeadSpace.so"
+check "donor content tree imported"               test -d "$GAMEDIR/assets/published"
 check "binary made executable"                   test -x "$GAMEDIR/deadspace"
 check "gptokeyb launched with the gptk"          grep -q "gptokeyb started" "$LOG"
 check "game library loaded through the launcher" grep -q "TRACE: module loaded" "$LOG"

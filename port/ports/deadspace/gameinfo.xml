@@ -3,11 +3,12 @@
 	<game>
 		<path>./Dead Space.sh</path>
 		<name>Dead Space</name>
-		<desc>The 2011 mobile survival-horror game. This port runs the original Android ARM library directly through a bionic/JNI compatibility loader. Supply your own extracted Xperia Play v1.1.33 game files.</desc>
+		<desc>The 2011 mobile survival-horror game by IronMonkey Studios. This port runs the original Android ARM library directly through a bionic/JNI compatibility loader. Supply your own Xperia Play v1.1.33 APK, ZIP or extracted game folder; the first launch imports it automatically.</desc>
 		<releasedate>20110125T000000</releasedate>
 		<developer>IronMonkey Studios</developer>
 		<publisher>Electronic Arts</publisher>
-		<genre>Action / Horror</genre>
+		<genre>Action / Adventure</genre>
 		<players>1</players>
+		<image>./deadspace/cover.png</image>
 	</game>
 </gameList>

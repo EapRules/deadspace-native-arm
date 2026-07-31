@@ -10,6 +10,7 @@ RUN dpkg --add-architecture armhf && \
         pkg-config \
         make \
         git \
+        python3 \
         ca-certificates \
         file \
         libsdl2-dev:armhf \

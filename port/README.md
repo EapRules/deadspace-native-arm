@@ -1,6 +1,6 @@
 # Dead Space — native ARM port
 
-Runs the 2011 EA/Visceral **Dead Space mobile** game on Linux/ARM handhelds by
+Runs the 2011 EA/IronMonkey **Dead Space mobile** game on Linux/ARM handhelds by
 loading its original Android native library into a bionic/JNI compatibility
 layer. No emulator or Android runtime is involved.
 
@@ -21,13 +21,13 @@ run, with real-time dummy audio consumption and the ARMv8 VFP compatibility
 patch enabled, reported:
 
 ```text
-375 frames
+555 frames
 84 successful content opens
-168 texture uploads
-22,009 draw calls
+151 texture uploads
+34,476 draw calls
 non-black framebuffer
-7 synthetic JNI keys
-2 measured scene changes
+11 synthetic JNI keys
+4 measured scene changes
 ```
 
 That proves startup, content loading, rendering and input-driven progression in
@@ -43,8 +43,10 @@ ChatGPT/Codex's M4→M7 work is in [`../TRASPASO.md`](../TRASPASO.md).
 
 ## Bring your own game
 
-This repository and its packages contain no EA binary or asset. Extract your
-own supported copy and give the loader a directory with:
+This repository and its packages contain no EA binary or asset. The supported
+donor is **Dead Space Mobile for Xperia Play v1.1.33**, Android package
+`com.eamobile.deadspace_sonyericsson`. Local developer runs give the loader an
+already-extracted directory with:
 
 ```text
 deadspace/
@@ -62,8 +64,11 @@ Run locally as:
 ./build/deadspace /path/to/extracted/deadspace
 ```
 
-The loader's runtime patches validate their expected instructions, and the
-PortMaster launcher also checks the complete library SHA1.
+The PortMaster release also carries `eapx`, a content-based transactional
+first-boot extractor. Release users may place the supported APK, ZIP or an
+extracted folder in `ports/deadspace/`; its filename does not matter. eapx
+stages and validates the complete payload before publishing it, and the
+launcher still checks the complete library SHA1 before applying patches.
 
 ## Build and verify
 
@@ -83,13 +88,24 @@ docker run --rm -v "$PWD":/src -w /src deadspace-build make libs
 ./package_portmaster.sh
 ```
 
-The zip is written to `build/deadspace-portmaster.zip`. It intentionally
+The zip is written to `build/deadspace.zip`. It intentionally
 contains neither `libEAMGameDeadSpace.so` nor `assets/published`.
 
 ## PortMaster install
 
-Install the package, then copy your extracted `assets/`, `lib/` and optional
-`var/` into `ports/deadspace/`. The resulting layout is:
+Use the same independent-autoinstall workflow as the Ice Rage and Minigore 2
+releases:
+
+1. put `deadspace.zip` in PortMaster's `autoinstall/` directory;
+2. put the user's Xperia Play v1.1.33 APK/ZIP in `ports/deadspace/` (or an
+   extracted donor under `ports/deadspace/gamedata/`);
+3. open PortMaster and let autoinstall finish;
+4. reboot, then launch Dead Space from Ports.
+
+The first launch extracts and validates the donor automatically. Complete
+CFW-specific paths, the two autoinstall gotchas and accepted donor layouts are
+in [`ports/deadspace/README.md`](ports/deadspace/README.md). The resulting
+layout is:
 
 ```text
 ports/
@@ -97,6 +113,8 @@ ports/
 └── deadspace/
     ├── deadspace
     ├── deadspace.gptk
+    ├── eapx.py
+    ├── deadspace.eapx.json
     ├── libs.armhf/
     ├── assets/                # your copy
     ├── lib/armeabi/           # your copy

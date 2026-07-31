@@ -1,13 +1,14 @@
 # Dead Space — traspaso técnico
 
 Estado actual (actualización ChatGPT/Codex, 2026-07-31): **M7 de 7**. El
-verificador inmutable completó 375 frames con consumo de audio en tiempo real,
-cargó contenido, procesó 168 uploads de textura, hizo 22.009 draws y demostró
-dos cambios de escena después de input JNI sintético. El fallback PVRTC ya fue
-confirmado en la Mali-G31 real. La candidata entregada corrige cursor, cámara
-continua y el camino de audio. Fue empaquetada, copiada con verificación de
-hash a la SD y el volumen fue expulsado correctamente; esas tres partes esperan
-la prueba en R36S.
+verificador inmutable completó 555 frames con consumo de audio en tiempo real,
+cargó contenido, procesó 151 uploads de textura, hizo 34.476 draws y demostró
+cuatro cambios de escena después de 11 inputs JNI sintéticos. El fallback PVRTC
+ya fue confirmado en la Mali-G31 real. La candidata de dispositivo que corrige
+cursor, cámara continua y el camino de audio fue empaquetada, copiada con
+verificación de hash a la SD y expulsada correctamente; esos tres cambios
+esperan la prueba en R36S. Después se construyó además el ZIP independiente
+BYOG/autoinstall documentado en 11.16, que todavía no fue copiado a la SD.
 
 Este documento es para que otro agente continúe sin repetir nada. Lo que está en
 `HALLAZGOS.md` es el triage del juego; esto es el estado de la investigación.
@@ -960,3 +961,85 @@ Corrida final del árbitro inmutable con estos cambios:
 [verify] M7 ok
 [verify] === milestone reached: 7 / 7 ===
 ```
+
+### 11.16 Release independiente con autoinstall y donor automático
+
+**Objetivo:** repetir el modelo ya publicado para Ice Rage y Minigore 2, no
+presentar todavía un PR al catálogo oficial. El usuario deja el ZIP libre del
+port en `PortMaster/autoinstall/`, deja su donor en `ports/deadspace/`, abre
+PortMaster, reinicia y lanza el juego. El port no descarga ni distribuye datos
+de EA.
+
+**Autoría:** `eapx` fue diseñado y escrito por **EapRules** en
+`Projects/Others/eapx`. ChatGPT/Codex auditó la herramienta, vendorizó una copia
+sin cambios en `port/tools/eapx.py` e implementó para Dead Space la receta, la
+integración del launcher, los tests de extremo a extremo, el empaquetado, las
+licencias y la documentación pública. No atribuir el motor de eapx a Codex.
+
+La herramienta encaja exactamente con este donor porque identifica APK, ZIP,
+XAPK/splits o carpetas por contenido y no por nombre, extrae a un stage dentro
+del mismo filesystem, valida y recién entonces publica por rename. Antes de
+integrarla se ejecutó su suite completa: **46 tests, 46 OK**, incluyendo cortes
+en cada paso del commit, rollback interrumpido, archivos ajenos, ZIP Slip,
+APKs fat, XAPK/splits y carpetas ya extraídas.
+
+La receta `ports/deadspace/deadspace.eapx.json` fija:
+
+```text
+lib/armeabi/libEAMGameDeadSpace.so
+size   4499468
+SHA1   0ed42b611415015807f759ec9b5457857143ce39
+SHA256 1ff0a34a2ef35f50c0031b383d8fd7b14369dca0f41969c5d4da8fabe569ed38
+```
+
+Acepta cuatro raíces conocidas sin que el usuario reacomode el archivo:
+
+```text
+assets/...
+deadspace/assets/...
+data/deadspace/assets/...
+NeededFiles/data/deadspace/assets/...
+```
+
+También valida el `EAMCore.ini` exacto y exige al menos 1.700 archivos y
+300.000.000 bytes bajo `assets/published`. Un test con un ZIP real cuya raíz es
+`deadspace/` produjo un plan de **1.771 items / 303,0 MiB**, lo extrajo,
+confirmó el SHA1, verificó nuevamente los 1.771 items y dejó marker válido.
+
+El launcher sólo invoca eapx cuando falta el árbol utilizable, de modo que las
+instalaciones manuales existentes siguen funcionando. Si falta Python 3, la
+receta o el runtime, muestra un error en la TTY; un fallo del donor deja el
+detalle en `eapx.log`. Tras una importación exitosa conserva el chequeo SHA1
+del launcher antes de aplicar cualquier parche por offset.
+
+`package_portmaster.sh` ahora genera `build/deadspace.zip`, incluye eapx,
+receta, placeholder, cover 4:3 aportada por el usuario, captura real 640x480 y
+las licencias del port/gmloader/PowerVR/VFPVector. `collect_libs.sh` resuelve el
+paquete Debian dueño de cada una de las diez `.so` transportadas y copia su
+copyright exacto; el empaquetado falla si falta uno. Sigue abortando si el ZIP
+contiene la biblioteca o los assets del juego.
+
+La prueba integral ejecutó el launcher real dentro del contenedor, con el donor
+copiado bajo un nombre sin significado y **176 bibliotecas armhf del sistema
+apartadas** para impedir falsos positivos. Resultado: eapx escribió marker y
+log, importó biblioteca/assets, el módulo cargó, dibujó hasta su resumen,
+`pm_finish` corrió, gptokeyb no quedó vivo y el launcher salió 0: **PASS**.
+
+El informe externo que señalaba `/game/ea/deadspace/` vacío y la deuda de VFP
+era correcto para una etapa vieja, pero no describe el HEAD actual. La ruta se
+resolvió en `32923c5` y el log demuestra
+`/game/ea/deadspace/published -> /game/assets/published (ok)`; los 40
+short-vectors se resolvieron en `9045dc0`/`ffd9348`. No se reabrieron ni se
+modificaron esos arreglos durante el trabajo del release.
+
+Artefacto independiente final, libre de contenido de EA:
+
+```text
+port/build/deadspace.zip
+size   8012014 bytes
+SHA256 18331bbbc74ec793187ddb6398eb2f889b442b66d15880f66bf0ed1740203b62
+```
+
+La última corrida del verificador inmutable posterior al empaquetado alcanzó
+M7/7 con 555 frames, 84 aperturas de contenido, 151 uploads de textura, 34.476
+draws, framebuffer no negro, 11 teclas inyectadas y cuatro cambios de escena.

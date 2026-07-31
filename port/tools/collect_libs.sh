@@ -63,7 +63,7 @@ needed_of() {
 }
 
 rm -rf "$OUT"
-mkdir -p "$OUT"
+mkdir -p "$OUT/licenses"
 
 seen=" "
 bundled=""
@@ -94,6 +94,22 @@ while [ -n "${queue// /}" ]; do
         # exFAT (what an SD card usually is) has no symlinks.
         cp -f "$path" "$OUT/$soname"
         chmod 0644 "$OUT/$soname"
+
+        # PortMaster releases carry the copyright terms of every shared
+        # library they redistribute. Resolve the owning Debian package from
+        # the exact file selected above and preserve its machine-readable
+        # copyright file next to the generated bundle. Failing here is safer
+        # than producing a legally incomplete release that otherwise works.
+        owner=$(dpkg-query -S "$path" 2>/dev/null | sed -n '1p')
+        package=${owner%%:*}
+        copyright="/usr/share/doc/$package/copyright"
+        if [ -z "$owner" ] || [ ! -f "$copyright" ]; then
+            echo "collect_libs: no copyright file found for $soname ($path)" >&2
+            exit 1
+        fi
+        cp -Lf "$copyright" "$OUT/licenses/$soname.copyright"
+        chmod 0644 "$OUT/licenses/$soname.copyright"
+
         bundled="$bundled$soname|$(basename "$path")|$(( $(stat -c%s "$path") / 1024 )) KB
 "
         next="$next $(needed_of "$path")"
