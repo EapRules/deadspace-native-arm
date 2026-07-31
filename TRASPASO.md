@@ -4,8 +4,10 @@ Estado actual (actualización ChatGPT/Codex, 2026-07-31): **M7 de 7**. El
 verificador inmutable completó 375 frames con consumo de audio en tiempo real,
 cargó contenido, procesó 168 uploads de textura, hizo 22.009 draws y demostró
 dos cambios de escena después de input JNI sintético. El fallback PVRTC ya fue
-confirmado en la Mali-G31 real. La candidata siguiente corrige cursor, cámara
-continua y el camino de audio; esas tres partes esperan la prueba en R36S.
+confirmado en la Mali-G31 real. La candidata entregada corrige cursor, cámara
+continua y el camino de audio. Fue empaquetada, copiada con verificación de
+hash a la SD y el volumen fue expulsado correctamente; esas tres partes esperan
+la prueba en R36S.
 
 Este documento es para que otro agente continúe sin repetir nada. Lo que está en
 `HALLAZGOS.md` es el triage del juego; esto es el estado de la investigación.
@@ -298,6 +300,8 @@ commits:
   9045dc0  audio/VFP (commit mixto; ver autoría arriba)
   ffd9348  self-test/cobertura (principalmente sesión concurrente)
   e55e188  atribución, prueba final y passthrough del self-test
+  5d2aac8  hash y contenido de la candidata empaquetada
+  73fd650  copia verificada, sync y expulsión de la SD
 
 build/deadspace
   7212196 bytes
@@ -324,8 +328,16 @@ Se preservaron `assets/`, `lib/`, `var/`, launcher y GPTK; sólo se actualizaron
 
 Los tres destinos coincidieron byte por byte (`cmp=0`) y por SHA-256 con sus
 fuentes. Se eliminaron únicamente los cuatro metadatos AppleDouble creados por
-macOS (`._deadspace`, `._README.md` y `._deadspace-portmaster-M7.zip`). Después
-se ejecutó `sync` y el volumen se expulsó con `diskutil eject`.
+macOS:
+
+```text
+/Volumes/ROMS/backup/._deadspace-portmaster-M7.zip
+/Volumes/ROMS/ports/._deadspace
+/Volumes/ROMS/ports/deadspace/._README.md
+/Volumes/ROMS/ports/deadspace/._deadspace
+```
+
+Después se ejecutó `sync` y el volumen se expulsó con `diskutil eject`.
 
 El harness no fue modificado. También se ejecutó un dry-run del launcher en un
 contenedor PortMaster descartable, quitando del sistema las bibliotecas que el
