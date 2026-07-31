@@ -64,6 +64,8 @@ launches start normally.
 - D-pad: move the menu pointer
 - A: click/tap; game A while the pointer is hidden
 - B: back
+- L2: rotate/switch weapon fire mode (simulated tilt)
+- R2: Zero-G jump (simulated motion gesture)
 - L3/R3: show or hide the pointer
 - Start: pause/menu and restore the pointer
 - Left stick: walk

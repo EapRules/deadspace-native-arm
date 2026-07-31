@@ -25,7 +25,7 @@ case "$1" in
         ;;
     button)
         [ "$#" -eq 3 ] || exit 2
-        [[ "$2" =~ ^(a|b|x|y|l1|r1|l3|r3|start|select|up|down|left|right)$ ]] || exit 2
+        [[ "$2" =~ ^(a|b|x|y|l1|l2|r1|r2|l3|r3|start|select|up|down|left|right)$ ]] || exit 2
         [[ "$3" == "down" || "$3" == "up" ]] || exit 2
         printf 'button %s %s\n' "$2" "$3" >> "$COMMANDS"
         ;;

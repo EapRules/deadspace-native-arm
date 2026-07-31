@@ -64,11 +64,14 @@ using KeyFn = void (*)(JNIEnv *, void *, int, int, int);
  */
 using PointerFn = void (__attribute__((pcs("aapcs"))) *)(
     JNIEnv *, void *, int, int, int, float, float);
+using AccelFn = void (__attribute__((pcs("aapcs"))) *)(
+    JNIEnv *, void *, float, float, float);
 
 static JNIEnv    *g_env = NULL;
 static KeyFn      g_key_down = NULL;
 static KeyFn      g_key_up = NULL;
 static PointerFn  g_pointer = NULL;
+static AccelFn    g_acceleration = NULL;
 static int        g_width = 640;
 static int        g_height = 480;
 static SDL_GameController *g_controllers[4] = {};
@@ -80,6 +83,155 @@ static float g_right_last_x = 0.0f, g_right_last_y = 0.0f;
 static unsigned int g_right_pulses = 0;
 static Uint8 g_accept_button = SDL_CONTROLLER_BUTTON_B;
 static Uint8 g_back_button = SDL_CONTROLLER_BUTTON_A;
+
+/*
+ * The Xperia Play build uses accelerometer gestures for two actions that have
+ * no ordinary key equivalent: tilting rotates/switches a weapon's fire mode,
+ * and a sharp movement performs a Zero-G jump. R36S-class handhelds have no
+ * motion sensor, while both analogue triggers are otherwise unused by this
+ * JNI input path.
+ *
+ * These are the measured Android acceleration samples used by deadspace-vita's
+ * optional D-pad accelerometer replacement, split at its explicit "for zero g
+ * jump" boundary. Preserve the short cadence: the game recognises a gesture,
+ * not a single static vector.
+ */
+struct AccelSample {
+    float x;
+    float y;
+    float z;
+    Uint16 delay_ms;
+};
+
+static const AccelSample kWeaponTilt[] = {
+    {-0.998903f, -0.244644f, -1.292267f, 8},
+    {-0.954221f, -0.367070f, -1.234914f, 8},
+    {-1.029063f, -0.042471f, -1.256281f, 8},
+    {-0.983264f, -0.268230f, -1.131455f, 8},
+    {-1.049170f, -0.140187f, -1.296765f, 8},
+    {-1.113959f, -0.304173f, -1.339498f, 8},
+    {-1.655727f,  2.366763f, -2.261636f, 8},
+    { 4.224865f, -2.941413f, -0.447724f, 8},
+    { 2.926493f, -1.684568f, -1.615015f, 8},
+    {-1.694824f,  1.514265f, -1.591399f, 8},
+    {-2.287976f,  0.611223f, -1.149448f, 8},
+    {-1.193269f, -0.221057f, -0.920038f, 8},
+    {-1.024595f, -0.370441f, -1.369861f, 8},
+    {-1.054755f, -0.157035f, -1.234914f, 8},
+    {-1.159758f, -0.240151f, -1.291142f, 8},
+    {-0.938582f, -0.179499f, -1.225918f, 8},
+    {-1.046936f, -0.228920f, -1.210174f, 8},
+    {-1.001137f, -0.234535f, -1.270900f, 8},
+    {-1.055872f, -0.152542f, -1.367612f, 8},
+    {-0.945284f, -0.057073f, -1.139327f, 8},
+    {-1.002254f, -0.198594f, -1.224793f, 8},
+    {-0.747567f, -0.235659f, -1.256281f, 8},
+    {-0.699534f, -0.044716f, -1.474445f, 8},
+    {-0.711821f,  0.117022f, -1.409221f, 8},
+    {-1.023478f,  0.222602f, -1.628510f, 8},
+    {-0.848101f, -0.006528f, -2.083956f, 8},
+    {-0.272822f, -0.489498f, -3.042079f, 8},
+    {-0.527508f, -0.292941f, -3.173653f, 8},
+    {-1.081564f,  0.283254f, -3.189397f, 8},
+    {-1.405508f,  0.348398f, -2.807047f, 8},
+    {-1.814348f,  0.492166f, -2.401081f, 8},
+    {-1.502691f,  0.095681f, -2.793552f, 8},
+    {-1.847859f,  0.522491f, -3.261368f, 8},
+};
+
+static const AccelSample kZeroGJump[] = {
+    {-1.761846f, -0.322144f, -1.657748f, 25},
+    {-1.188801f, -0.022254f, -1.695983f, 8},
+    {-0.794483f, -0.263738f, -2.931873f, 8},
+    {-0.745333f, -0.150296f, -2.825040f, 8},
+    {-0.873793f, -0.444571f, -1.743215f, 8},
+    {-0.804536f, -0.127832f, -3.795533f, 8},
+    {-1.742857f,  0.038399f, -1.233790f, 8},
+    {-0.812356f,  0.224848f, -2.738449f, 8},
+    { 0.863030f,  3.779731f, -9.721955f, 8},
+    {-4.183607f,  3.622485f,  8.522037f, 8},
+    {-6.169717f,  7.627765f, 23.052782f, 8},
+    {-0.738630f,  6.358565f, 14.906132f, 8},
+    { 0.151609f,  2.630712f,  9.449697f, 8},
+    { 0.831056f,  3.416942f,  6.462183f, 8},
+    {-2.905704f,  5.808204f, -9.787180f, 8},
+    {-2.807403f,  1.275026f, -4.152019f, 8},
+    {-2.541546f, -0.363701f,  0.349680f, 8},
+    {-2.520322f,  0.236080f, -2.166049f, 8},
+    {-1.934989f, -0.196346f, -0.763724f, 8},
+    {-2.559419f, -0.453556f,  0.108265f, 8},
+    {-1.904829f, -0.004282f, -1.038117f, 8},
+    {-2.014299f, -0.291818f, -0.051879f, 8},
+    {-2.021002f, -0.269354f, -1.045988f, 8},
+    {-1.804294f, -0.230042f, -1.018999f, 8},
+    {-2.016533f, -0.192978f, -0.518571f, 8},
+    {-1.768549f, -0.101999f, -1.323754f, 8},
+    {-1.541788f, -0.406383f, -1.025746f, 8},
+};
+
+static const AccelSample *g_accel_samples = NULL;
+static size_t g_accel_count = 0;
+static size_t g_accel_index = 0;
+static Uint32 g_accel_next_ms = 0;
+static const char *g_accel_name = NULL;
+static bool g_l2_down = false;
+static bool g_r2_down = false;
+
+static void start_accel_gesture(const AccelSample *samples, size_t count,
+                                const char *name)
+{
+    if (!g_acceleration) {
+        warning("input: cannot start %s gesture; acceleration JNI symbol is missing\n",
+                name);
+        return;
+    }
+    g_accel_samples = samples;
+    g_accel_count = count;
+    g_accel_index = 0;
+    g_accel_next_ms = SDL_GetTicks();
+    g_accel_name = name;
+    trace("input: %s accelerometer gesture started (%zu samples)", name, count);
+}
+
+static void update_accel_gesture(void)
+{
+    if (!g_accel_samples || !g_acceleration)
+        return;
+
+    Uint32 now = SDL_GetTicks();
+    while (g_accel_index < g_accel_count &&
+           (Sint32)(now - g_accel_next_ms) >= 0) {
+        const AccelSample &sample = g_accel_samples[g_accel_index++];
+        g_acceleration(g_env, (void *)0x42424242,
+                       sample.x, sample.y, sample.z);
+        g_accel_next_ms += sample.delay_ms;
+    }
+
+    if (g_accel_index == g_accel_count) {
+        trace("input: %s accelerometer gesture completed", g_accel_name);
+        g_accel_samples = NULL;
+        g_accel_count = 0;
+        g_accel_index = 0;
+        g_accel_name = NULL;
+    }
+}
+
+static void trigger_changed(bool left, Sint16 value)
+{
+    bool down = value > 16000;
+    bool &was_down = left ? g_l2_down : g_r2_down;
+    if (down && !was_down) {
+        if (left)
+            start_accel_gesture(kWeaponTilt,
+                                sizeof(kWeaponTilt) / sizeof(kWeaponTilt[0]),
+                                "weapon-tilt/L2");
+        else
+            start_accel_gesture(kZeroGJump,
+                                sizeof(kZeroGJump) / sizeof(kZeroGJump[0]),
+                                "zero-g/R2");
+    }
+    was_down = down;
+}
 
 /*
  * Dead Space's menus are touch-only. The Vita port uses the front touchscreen
@@ -208,6 +360,7 @@ void android_input_tick(void)
      * per rendered frame even when the physical axis value is unchanged.
      */
     update_sticks();
+    update_accel_gesture();
 
     Uint32 now = SDL_GetTicks();
     if (!g_cursor_last_ms)
@@ -254,6 +407,16 @@ bool android_input_inject_control(const char *name, bool down)
 {
     if (!name)
         return false;
+
+    if (!strcasecmp(name, "l2") || !strcasecmp(name, "r2")) {
+        SDL_Event event = {};
+        event.type = SDL_CONTROLLERAXISMOTION;
+        event.caxis.axis = !strcasecmp(name, "l2")
+            ? SDL_CONTROLLER_AXIS_TRIGGERLEFT
+            : SDL_CONTROLLER_AXIS_TRIGGERRIGHT;
+        event.caxis.value = down ? 32767 : 0;
+        return android_input_event(&event);
+    }
 
     Uint8 button;
     if (!strcasecmp(name, "a"))             button = g_accept_button;
@@ -394,6 +557,8 @@ void android_input_init(so_module *mod, JNIEnv *env, int width, int height)
         mod, "Java_com_ea_blast_KeyboardAndroid_NativeOnKeyUp");
     g_pointer = (PointerFn)so_symbol(
         mod, "Java_com_ea_blast_TouchSurfaceAndroid_NativeOnPointerEvent");
+    g_acceleration = (AccelFn)so_symbol(
+        mod, "Java_com_ea_blast_AccelerometerAndroidDelegate_NativeOnAcceleration");
 
     const char *auto_env = getenv("DEADSPACE_AUTOPILOT");
     g_autopilot = auto_env && *auto_env && strcmp(auto_env, "0") != 0;
@@ -419,9 +584,11 @@ void android_input_init(so_module *mod, JNIEnv *env, int width, int height)
         if (controller)
             opened++;
 
-    trace("input bridge: JNI keys=%s pointer=%s joysticks=%d controllers=%d "
+    trace("input bridge: JNI keys=%s pointer=%s acceleration=%s "
+          "joysticks=%d controllers=%d "
           "face-layout=%s%s",
           g_key_down && g_key_up ? "yes" : "no", g_pointer ? "yes" : "no",
+          g_acceleration ? "yes" : "no",
           available, opened,
           g_accept_button == SDL_CONTROLLER_BUTTON_B ? "Nintendo" : "Xbox",
           g_autopilot ? " autopilot=on" : "");
@@ -429,6 +596,7 @@ void android_input_init(so_module *mod, JNIEnv *env, int width, int height)
     cursor_show();
     trace("input: menus use d-pad cursor + physical A tap; L3/R3 toggle cursor; "
           "Start restores it");
+    trace("input: L2 simulates weapon tilt; R2 simulates Zero-G motion");
 }
 
 bool android_input_event(const SDL_Event *event)
@@ -531,6 +699,12 @@ bool android_input_event(const SDL_Event *event)
         case SDL_CONTROLLER_AXIS_LEFTY:  g_ly = event->caxis.value; break;
         case SDL_CONTROLLER_AXIS_RIGHTX: g_rx = event->caxis.value; break;
         case SDL_CONTROLLER_AXIS_RIGHTY: g_ry = event->caxis.value; break;
+        case SDL_CONTROLLER_AXIS_TRIGGERLEFT:
+            trigger_changed(true, event->caxis.value);
+            break;
+        case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:
+            trigger_changed(false, event->caxis.value);
+            break;
         default: return true;
         }
         break;

@@ -14,6 +14,8 @@
   JohnnyonFlame, derived from Andy Nguyen's Vita so-loader
 - PVRTC decompression: Imagination Technologies PowerVR SDK
 - ARMv8 short-vector expansion: adapted from VFPVector by Bythos14
+- accelerometer gesture reference and measured samples: deadspace-vita by
+  v-atamanenko
 - bundled runtime libraries: their respective Debian/upstream maintainers
 
 The exact licences and copyright notices are distributed under `licenses/`.

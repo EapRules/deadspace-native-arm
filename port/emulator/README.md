@@ -25,6 +25,10 @@ Manual examples:
 ./emulator/send.sh click up
 ./emulator/send.sh button start down
 ./emulator/send.sh button start up
+./emulator/send.sh button l2 down  # weapon-tilt gesture
+./emulator/send.sh button l2 up
+./emulator/send.sh button r2 down  # Zero-G motion gesture
+./emulator/send.sh button r2 up
 ./emulator/send.sh stick right 1 0
 ./emulator/send.sh stick right 0 0
 ./emulator/send.sh screenshot menu

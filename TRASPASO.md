@@ -5,8 +5,8 @@ Las contribuciones posteriores de cada agente se separan abajo para conservar
 la atribución técnica sin reemplazar la autoría principal del proyecto.
 
 Estado actual (actualización ChatGPT/Codex, 2026-07-31): **M7 de 7**. El
-verificador inmutable completó 555 frames con consumo de audio en tiempo real,
-cargó contenido, procesó 151 uploads de textura, hizo 34.476 draws y demostró
+verificador inmutable completó 570 frames con consumo de audio en tiempo real,
+cargó contenido, procesó 151 uploads de textura, hizo 35.511 draws y demostró
 cuatro cambios de escena después de 11 inputs JNI sintéticos. El fallback PVRTC
 ya fue confirmado en la Mali-G31 real. La candidata de dispositivo que corrige
 cursor, cámara continua y el camino de audio fue empaquetada, copiada con
@@ -1040,10 +1040,68 @@ Artefacto independiente final, libre de contenido de EA:
 
 ```text
 port/build/deadspace.zip
-size   8013018 bytes
-SHA256 2ac633b3896f9c981c4f9c709129b59da35c9e8aa057626885a02c9f807b0b54
+size   8016341 bytes
+SHA256 5cda0a656d0cf63b872b0c4b829c52e7afd06b3af77468c9a94d0c9d3732a17c
 ```
 
 La última corrida del verificador inmutable posterior al empaquetado alcanzó
-M7/7 con 555 frames, 84 aperturas de contenido, 151 uploads de textura, 34.476
-draws, framebuffer no negro, 11 teclas inyectadas y cuatro cambios de escena.
+M7/7. La corrida posterior del cambio de acelerómetro se registra en 11.17.
+
+### 11.17 Sustitución del acelerómetro con L2/R2
+
+La prueba de juego real de EapRules confirmó que render, audio y controles
+principales funcionan, y encontró una interacción no bloqueante que luego se
+vuelve obligatoria: el juego pide inclinar el teléfono para rotar/cambiar el
+modo del arma. El mismo sensor se usa más adelante para saltar en Zero-G.
+
+El camino activo `android/input_bridge.cpp` no procesaba
+`SDL_CONTROLLER_AXIS_TRIGGERLEFT/RIGHT`; L2 y R2 estaban completamente libres.
+El shim declaraba un acelerómetro, pero `AccelerometerAndroidDelegate` sólo
+aceptaba `SetEnabled` y descartaba la operación. El binario sí exporta:
+
+```text
+Java_com_ea_blast_AccelerometerAndroidDelegate_NativeOnAcceleration
+signature Java: (FFF)V
+ABI del juego: armeabi softfp / pcs("aapcs")
+```
+
+El `classes.dex` decompilado confirma que Android le pasa directamente
+`SensorEvent.values[0..2]`. Como referencia primaria se auditó
+`v-atamanenko/deadspace-vita` (`loader/reimpl/controls.c`): su opción sin sensor
+reproduce una secuencia medida y marca de forma explícita el comienzo de las
+muestras para Zero-G. Se conservaron esos valores y su cadencia, separados en:
+
+- **L2:** 33 muestras de inclinación para rotar/cambiar el modo del arma;
+- **R2:** 27 muestras de movimiento brusco para saltar en Zero-G.
+
+Cada gesto se dispara una vez en el flanco de presión del gatillo; mantenerlo
+no repite acciones y hay que soltarlo antes de volver a usarlo. La llamada usa
+un puntero `pcs("aapcs")`, necesario porque los tres floats del juego siguen
+softfp mientras el loader se compila hardfp. El emulador/MCP y `send.sh` también
+aceptan ahora `l2` y `r2`.
+
+Prueba dinámica bajo qemu con el juego real:
+
+```text
+input bridge: JNI keys=yes pointer=yes acceleration=yes
+input: weapon-tilt/L2 accelerometer gesture started (33 samples)
+input: weapon-tilt/L2 accelerometer gesture completed
+input: zero-g/R2 accelerometer gesture started (27 samples)
+input: zero-g/R2 accelerometer gesture completed
+run finished: 369 frames
+```
+
+El motor siguió dibujando sin crash. Después, el verificador inmutable completo
+volvió a pasar:
+
+```text
+[verify] M5 ok (570 frames)
+[verify] M6 counters: assets=84 textures=151 draws=35511 nonblack=1
+[verify] M7 autopilot: injected 11 keys over 570 frames, scene changed 4 time(s)
+[verify] === milestone reached: 7 / 7 ===
+```
+
+La secuencia y su licencia MIT se atribuyen a deadspace-vita en `NOTICE.md`,
+`CREDITS.md` y `third_party/deadspace-vita/LICENSE`. Falta confirmar ambos
+gatillos en la R36S: L2 durante el tutorial de modo de arma y R2 en una zona
+Zero-G.

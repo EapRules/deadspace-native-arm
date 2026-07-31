@@ -6,11 +6,11 @@
  * The three small com/ea/blast delegates the engine builds while standing up
  * its input and power stacks, in one file because they are one decision.
  *
- * None of them can be implemented honestly on this device: there is no
- * accelerometer, no rotation sensor and no screen-timeout to suppress. What
- * they need to be is *present* - the engine constructs each one and calls into
- * it during renderer bring-up, and a missing class means a NULL jmethodID that
- * it walks straight into.
+ * There is no physical accelerometer, no rotation sensor and no screen-timeout
+ * to suppress. These delegates still need to be *present*: the engine
+ * constructs each one during renderer bring-up, and a missing class means a
+ * NULL jmethodID that it walks straight into. Synthetic L2/R2 acceleration is
+ * injected directly through the native export by android/input_bridge.cpp.
  *
  * Every signature was transcribed from the descriptor the engine passed to
  * GetMethodID, not guessed. Lookup is an exact strcmp on name and signature

@@ -23,10 +23,10 @@ run, with real-time dummy audio consumption and the ARMv8 VFP compatibility
 patch enabled, reported:
 
 ```text
-555 frames
+570 frames
 84 successful content opens
 151 texture uploads
-34,476 draw calls
+35,511 draw calls
 non-black framebuffer
 11 synthetic JNI keys
 4 measured scene changes
@@ -37,8 +37,8 @@ the harness. The PVRTC fallback is also confirmed on the real R36S Mali-G31:
 the previously white characters, objects and backgrounds now render correctly.
 The current candidate also initializes SDL audio, uses a bounded hardware
 period and expands the obsolete VFP short-vector mixer operations for ARMv8.
-Audio output, the new cursor/camera behavior, saves and a complete play-through
-still require device testing.
+Audio output, the new cursor/camera behavior, L2/R2 accelerometer gestures,
+saves and a complete play-through still require device testing.
 
 The full investigation history and explicit split between Claude's work and
 ChatGPT/Codex's M4→M7 work is in [`../TRASPASO.md`](../TRASPASO.md).
@@ -134,6 +134,8 @@ exported JNI entry points, matching the working Vita port:
 - title/menus: D-pad moves a visible software cursor, A taps it
 - L3 or R3 toggles the menu cursor after it has been dismissed
 - Start restores the cursor while opening the pause menu
+- L2 simulates the accelerometer tilt used to rotate/switch weapon fire mode
+- R2 simulates the accelerometer motion required for a Zero-G jump
 - buttons outside cursor mode → `KeyboardAndroid.NativeOnKeyDown/Up`
 - left stick → virtual touchscreen movement stick
 - right stick → virtual touchpad aiming stick
@@ -193,8 +195,8 @@ R36S test.
 Current device-test binary:
 
 ```text
-SHA256 92b55dfca095dffcb26fa4074547dfb9bec4b7110853fd84ccb337dae5a2078c
-size   7212196 bytes
+SHA256 d0ba9983a13a1cf7dbd7a7c5c26d57d544cd9e435ffe80308a03799ea20390de
+size   7215740 bytes
 ```
 
 ## Interactive local emulator

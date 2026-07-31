@@ -101,21 +101,21 @@ Class DeviceOrientationHandlerAndroidDelegate::clazz = {
 void AccelerometerAndroidDelegate::ctor(JNIEnv *env, jobject obj, jclass clazz)
 {
     (void)env; (void)obj; (void)clazz;
-    trace("AccelerometerAndroidDelegate constructed (no accelerometer; "
-          "the engine will read zeroes)");
+    trace("AccelerometerAndroidDelegate constructed (no physical sensor; "
+          "L2/R2 provide synthetic gestures)");
 }
 
 /*
- * Accepted and dropped. The R36S has no accelerometer, so enabling it would
- * only start a source of samples nobody can produce. Dead Space uses tilt for
- * a couple of optional aiming assists, never for anything required - the game
- * is playable with the stick alone, which is what SystemAndroidDelegate
- * already reports.
+ * Accepted without starting a physical sensor. android/input_bridge.cpp calls
+ * the game's NativeOnAcceleration export directly when L2 or R2 reproduces a
+ * measured gesture. This Java-side switch therefore has no device resource to
+ * acquire, but the class and method must still exist for renderer startup.
  */
 void AccelerometerAndroidDelegate::SetEnabled(JNIEnv *env, jobject obj, jboolean enabled)
 {
     (void)env; (void)obj;
-    trace("Accelerometer.SetEnabled(%s) - no accelerometer on this device",
+    trace("Accelerometer.SetEnabled(%s) - synthetic L2/R2 source needs no "
+          "physical listener",
           enabled ? "true" : "false");
 }
 

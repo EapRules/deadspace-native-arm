@@ -39,6 +39,7 @@ mkdir -p "$STAGE/deadspace/licenses/libraries"
 cp LICENSE "$STAGE/deadspace/licenses/LICENSE-portmaster-port.txt"
 cp NOTICE.md "$STAGE/deadspace/licenses/NOTICE.md"
 cp third_party/gmloader/LICENSE.md "$STAGE/deadspace/licenses/LICENSE-gmloader.md"
+cp third_party/deadspace-vita/LICENSE "$STAGE/deadspace/licenses/LICENSE-deadspace-vita.txt"
 cp third_party/powervr/LICENSE.md "$STAGE/deadspace/licenses/LICENSE-powervr.txt"
 cp third_party/vfpvector/LICENSE "$STAGE/deadspace/licenses/LICENSE-vfpvector.txt"
 mv "$STAGE/deadspace/libs.armhf/licenses/"* \
@@ -62,6 +63,7 @@ for required in "Dead Space.sh" "deadspace/deadspace" \
                 "deadspace/PUT_DEAD_SPACE_DATA_HERE.txt" \
                 "deadspace/licenses/LICENSE-portmaster-port.txt" \
                 "deadspace/licenses/LICENSE-gmloader.md" \
+                "deadspace/licenses/LICENSE-deadspace-vita.txt" \
                 "deadspace/licenses/LICENSE-powervr.txt" \
                 "deadspace/licenses/LICENSE-vfpvector.txt" \
                 "deadspace/licenses/libraries/libcrypto.so.3.copyright" \

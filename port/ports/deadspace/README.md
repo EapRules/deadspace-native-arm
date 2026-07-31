@@ -110,6 +110,8 @@ turns the handheld controls into the same touch/key events used by the game.
 | B | Back |
 | X / Y | Xperia Play X / Y |
 | L1 / R1 | Shoulder buttons |
+| L2 | Rotate/switch the weapon fire mode (simulated tilt) |
+| R2 | Jump in Zero-G (simulated accelerometer motion) |
 | Start | Pause/menu and restore the pointer |
 | L3 / R3 | Show or hide the pointer |
 | Left stick | Walk through the virtual movement stick |
@@ -156,7 +158,8 @@ The bionic ELF loader and JNI/libc compatibility work derive from
 [gmloader-next](https://github.com/JohnnyonFlame/gmloader-next), itself based on
 Andy Nguyen's Vita so-loader. PVRTC decoding comes from Imagination
 Technologies' PowerVR SDK, and the ARMv8 short-vector expansion is adapted from
-Bythos14's VFPVector.
+Bythos14's VFPVector. The trigger-driven accelerometer samples are adapted from
+the MIT-licensed deadspace-vita port by v-atamanenko.
 
 The port is GPL-3.0. Exact notices and the copyright terms for every bundled
 shared library are shipped under `licenses/`; the complete project attribution

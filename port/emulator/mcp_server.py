@@ -160,7 +160,7 @@ def click(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 VALID_CONTROLS = {
-    "a", "b", "x", "y", "l1", "r1", "l3", "r3",
+    "a", "b", "x", "y", "l1", "l2", "r1", "r2", "l3", "r3",
     "start", "select", "up", "down", "left", "right",
 }
 
