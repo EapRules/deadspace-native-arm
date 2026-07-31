@@ -22,16 +22,31 @@ SHA1:            0ed42b611415015807f759ec9b5457857143ce39
 
 Backups of this release are sometimes labelled **Dead Space Mobile Version
 1.1.33** or **dead space vita 1.1.33**. The label and filename are not trusted:
-the first-boot extractor accepts the donor only when its contents and native
-library match the supported build.
+the first-boot extractor accepts the donor only when its contents, native
+library and several campaign/UI files match a supported build.
+
+Two content variants are recognised:
+
+- the complete Xperia Play tree, with roughly 303 MiB under
+  `assets/published/`;
+- the Vita-ready `deadspace.zip` commonly distributed under the second label,
+  whose ZIP is 145,903,794 bytes (SHA1
+  `61d51d8ba5374f97b5a4971a2d9d7da31baf840c`). It keeps the main campaign but
+  omits the optional `~2x` UI set, Survival maps and Burst Rifle content.
+
+The complete tree is preferred when available. Both contain the same required
+native library and are validated as explicit known variants; merely lowering a
+file-count check is not enough to make an arbitrary partial archive install.
 
 ## Install with PortMaster autoinstall
 
 Do not manually unzip the port release into `ports/`. Let PortMaster install
 it so the executable bit and EmulationStation entry are created correctly.
 
-1. Put the release file **`deadspace.zip`** in PortMaster's `autoinstall/`
-   directory:
+1. Put the port release in PortMaster's `autoinstall/` directory. The release
+   asset is named **`deadspace-portmaster.zip`** so it cannot be confused with
+   the Vita RIP donor's own `deadspace.zip`; PortMaster accepts any `.zip`
+   filename in this directory.
 
    | CFW | Autoinstall directory |
    |---|---|
@@ -47,7 +62,7 @@ it so the executable bit and EmulationStation entry are created correctly.
    For APK or ZIP input:
 
    ```text
-   ports/deadspace/my-dead-space-copy.zip
+   ports/deadspace/deadspace.zip
    ```
 
    If your source is a 7z, extract it on the computer first and use:
@@ -69,11 +84,11 @@ it so the executable bit and EmulationStation entry are created correctly.
    the Ports list that EmulationStation loaded at boot.
 
 5. Launch Dead Space from Ports. The first launch discovers the donor by
-   content, extracts roughly 303 MiB into a temporary stage, validates every
-   required output and publishes it atomically. Keep at least 500 MiB free and
-   do not power off during this first extraction. Later launches start
-   normally. Once the game has launched successfully, the original donor file
-   is no longer required by the port.
+   content, extracts roughly 243-303 MiB into a temporary stage, validates
+   every required output and publishes it atomically. Keep at least 500 MiB
+   free and do not power off during this first extraction. Later launches
+   start normally. Once the game has launched successfully, the original donor
+   file is no longer required by the port.
 
 The importer accepts these layouts without requiring the user to rearrange
 them:

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "id": "deadspace-xperia-1.1.33",
-  "version": "1",
+  "version": "2",
   "title": "DEAD SPACE",
   "abi_order": [
     "armeabi"
@@ -46,7 +46,7 @@
       },
       "validate": {
         "min_files": 1700,
-        "min_bytes": 300000000
+        "min_bytes": 254000000
       }
     },
     {
@@ -63,7 +63,7 @@
       },
       "validate": {
         "min_files": 1700,
-        "min_bytes": 300000000
+        "min_bytes": 254000000
       }
     },
     {
@@ -80,7 +80,7 @@
       },
       "validate": {
         "min_files": 1700,
-        "min_bytes": 300000000
+        "min_bytes": 254000000
       }
     },
     {
@@ -97,7 +97,7 @@
       },
       "validate": {
         "min_files": 1700,
-        "min_bytes": 300000000
+        "min_bytes": 254000000
       }
     }
   ],
@@ -116,7 +116,43 @@
     {
       "path": "assets/published",
       "min_files": 1700,
-      "min_bytes": 300000000
+      "min_bytes": 254000000
+    },
+    {
+      "path": "assets/published/data/level_index.sb",
+      "sha256": [
+        "ff80c9fd92b3a7b42405991700b3d066238c94c7280e0dcaac84ab677c4916a6",
+        "ef14959fea9519b6f698e153bc66cf0a4f9a49bff03d97f0f14b204136320636"
+      ]
+    },
+    {
+      "path": "assets/published/layoutdata/layouts.xml.sb",
+      "sha256": "0f99badf5a7523ba0cc3e5749bf18b40807eb2d0fd11a66cc3c9c65656b4233a"
+    },
+    {
+      "path": "assets/published/maps/01_gov_01.scene.sb",
+      "sha256": [
+        "545104b57128e0c7991f4bdb0178ff172922addbe8651d6e94f648998fb51857",
+        "59f84d0e52e434bb1bdbf5c196d8865c1bdff3a091a3eb528eea9898ec07c081"
+      ]
+    },
+    {
+      "path": "assets/published/models/main_menu.m3g",
+      "sha256": [
+        "fb3c31c1ce7d45d0c53807695ffa5b9d44e47750b8c8c978aadc49d318e99c65",
+        "58f88fed2d49276b7fc492ce2286f657820df3ba2b02cc01cda24c13cdd8d9e3"
+      ]
+    },
+    {
+      "path": "assets/published/texturepacks_ui/ui_frontend.m3g",
+      "sha256": [
+        "d037a87dfdbea2719077cfc12b69777d47bb155195c66e230c82956f7ac87cb7",
+        "0fa9c375a867dbeba56d34c28d2d4a0ea2cffdeb63869486be3ebc2bf08fa809"
+      ]
+    },
+    {
+      "path": "assets/published/sounds/soundBase.sb",
+      "sha256": "370d75a5d373d690f58b1470a39ca8b4998556419f3f92ad77b8ec9f02eb59c8"
     }
   ],
   "commit": [

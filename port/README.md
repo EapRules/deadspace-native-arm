@@ -70,7 +70,10 @@ The PortMaster release also carries `eapx`, a content-based transactional
 first-boot extractor. Release users may place the supported APK, ZIP or an
 extracted folder in `ports/deadspace/`; its filename does not matter. eapx
 stages and validates the complete payload before publishing it, and the
-launcher still checks the complete library SHA1 before applying patches.
+launcher still checks the complete library SHA1 before applying patches. The
+known 145,903,794-byte Vita-ready `deadspace.zip` is accepted explicitly as a
+reduced donor: it keeps the campaign but omits the optional `~2x` UI, Survival
+maps and Burst Rifle files. A complete Xperia Play tree remains supported.
 
 ## Build and verify
 
@@ -98,7 +101,7 @@ contains neither `libEAMGameDeadSpace.so` nor `assets/published`.
 Use the same independent-autoinstall workflow as the Ice Rage and Minigore 2
 releases:
 
-1. put `deadspace.zip` in PortMaster's `autoinstall/` directory;
+1. put our `deadspace-portmaster.zip` in PortMaster's `autoinstall/` directory;
 2. put the user's Xperia Play v1.1.33 APK/ZIP in `ports/deadspace/` (or an
    extracted donor under `ports/deadspace/gamedata/`);
 3. open PortMaster and let autoinstall finish;

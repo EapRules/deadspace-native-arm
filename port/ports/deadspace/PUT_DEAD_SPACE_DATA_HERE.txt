@@ -12,6 +12,11 @@ Known labels for the supported data include:
 
   Dead Space Mobile Version 1.1.33
   Dead Space Mobile for Xperia Play v1.1.33
+  dead space vita 1.1.33
+
+The known Vita-ready deadspace.zip is also supported. It contains the main
+campaign but omits optional Survival, Burst Rifle and ~2x UI data. README.md
+records its exact archive identity and the difference from a complete donor.
 
 Do not place the PortMaster release zip here. That zip belongs in PortMaster's
 autoinstall folder. See README.md for the complete installation instructions.

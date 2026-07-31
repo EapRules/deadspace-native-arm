@@ -30,25 +30,44 @@ lib/armeabi/libEAMGameDeadSpace.so
 SHA1: 0ed42b611415015807f759ec9b5457857143ce39
 ```
 
-Some backups label it **Dead Space Mobile Version 1.1.33** or **dead space vita
-1.1.33**. The filename does not matter: the port identifies the donor by its
-contents and rejects the wrong native library before applying any patches.
+Two donor variants are supported:
+
+- **Complete donor**: the full Xperia Play data, roughly 303 MiB extracted.
+- **Vita RIP donor**: the reduced `deadspace.zip` published as
+  [dead space vita 1.1.33](https://archive.org/details/deadspace_202504).
+  It keeps the campaign but omits the optional `~2x` UI, Survival maps and
+  Burst Rifle data. Its ZIP is 145,903,794 bytes, SHA1
+  `61d51d8ba5374f97b5a4971a2d9d7da31baf840c`.
+
+[Dead Space Mobile Version 1.1.33](https://archive.org/details/dead-space-mobile-ps-vita-1.1.33)
+contains the exact same Vita RIP `deadspace.zip` plus a Vita VPK that this port
+does not use. There is no need to download the VPK. The filename alone is not
+trusted: the port identifies the donor by its contents and rejects the wrong
+native library or asset variant before applying any patches.
 
 **HOW TO INSTALL**
 
 With the SD card in your computer:
 
-1. Put the release `deadspace.zip` in PortMaster's `autoinstall/` folder.
-2. Create `ports/deadspace/` and put your own APK or donor ZIP there. Leave it
-   compressed; the filename does not matter. If your source is a 7z, extract
-   it on the computer under `ports/deadspace/gamedata/donor/` instead.
+1. Put our release `deadspace-portmaster.zip` in PortMaster's `autoinstall/`
+   folder.
+2. Create `ports/deadspace/` and put the donor `deadspace.zip` there. Leave it
+   compressed. If your source is a 7z, extract it on the computer under
+   `ports/deadspace/gamedata/donor/` instead.
+
+The clean two-file layout is:
+
+```text
+tools/PortMaster/autoinstall/deadspace-portmaster.zip  # our free port
+ports/deadspace/deadspace.zip                          # your game donor
+```
 
 Same card, same trip. Put it back in the console, open PortMaster and let it
 install, then **REBOOT**. Dead Space appears in Ports after the reboot.
 
-The first launch extracts and validates about 303 MiB of game data. Keep at
-least 500 MiB free and do not power off during that first extraction. Later
-launches start normally.
+The first launch extracts and validates about 243-303 MiB of game data,
+depending on the donor. Keep at least 500 MiB free and do not power off during
+that first extraction. Later launches start normally.
 
 **TWO GOTCHAS**
 

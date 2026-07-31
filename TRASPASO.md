@@ -4,15 +4,17 @@
 Las contribuciones posteriores de cada agente se separan abajo para conservar
 la atribución técnica sin reemplazar la autoría principal del proyecto.
 
-Estado actual (actualización ChatGPT/Codex, 2026-07-31): **M7 de 7**. El
-verificador inmutable completó 570 frames con consumo de audio en tiempo real,
-cargó contenido, procesó 151 uploads de textura, hizo 35.511 draws y demostró
-cuatro cambios de escena después de 11 inputs JNI sintéticos. El fallback PVRTC
-ya fue confirmado en la Mali-G31 real. La candidata de dispositivo que corrige
-cursor, cámara continua y el camino de audio fue empaquetada, copiada con
-verificación de hash a la SD y expulsada correctamente; esos tres cambios
-esperan la prueba en R36S. Después se construyó además el ZIP independiente
-BYOG/autoinstall documentado en 11.16, que todavía no fue copiado a la SD.
+Estado actual (actualización ChatGPT/Codex, 2026-07-31): **M7 de 7 con el donor
+completo**. El verificador inmutable completó 570 frames con consumo de audio
+en tiempo real, cargó contenido, procesó 151 uploads de textura, hizo 35.511
+draws y demostró cuatro cambios de escena después de 11 inputs JNI sintéticos.
+En la R36S real EapRules confirmó imagen centrada, fallback PVRTC, escena 3D,
+audio y controles principales. Después se corrigieron cursor recuperable,
+cámara continua, acelerómetro en L2/R2 y portada normalizada. La SD contiene
+ahora una instalación final deliberadamente limpia: sólo el ZIP libre del port
+en `autoinstall/` y el donor público Vita RIP en `ports/deadspace/`. PortMaster
+y el primer arranque todavía deben validar ese flujo exacto en el dispositivo;
+los detalles y la diferencia respecto del donor completo están en 11.19.
 
 Este documento es para que otro agente continúe sin repetir nada. Lo que está en
 `HALLAZGOS.md` es el triage del juego; esto es el estado de la investigación.
@@ -1152,6 +1154,93 @@ sistema apartadas, importación eapx real, arranque del juego y salida limpia:
 [dryrun] === PASS ===
 ```
 
-Este arreglo está empaquetado pero todavía no se copió a la SD: el volumen fue
-expulsado correctamente al cerrar 11.17 y debe volver a insertarse para aplicar
-el launcher actualizado y reemplazar de inmediato la copia global vieja.
+Al cerrar 11.18 este arreglo estaba empaquetado pero todavía no se había copiado
+a la SD porque el volumen había sido expulsado al cerrar 11.17. La instalación
+limpia posterior de 11.19 ya incorpora ese launcher y su portada normalizada.
+
+### 11.19 Instalación limpia y soporte dual Complete/Vita RIP
+
+La prueba de publicación dejó claro que un APK no es un requisito técnico. El
+port necesita un donor que contenga la biblioteca ARM exacta y un árbol de
+assets admitido; puede llegar como APK, ZIP o carpeta extraída. Para reproducir
+el recorrido de un usuario real se investigaron estos dos ítems públicos:
+
+```text
+dead space vita 1.1.33
+https://archive.org/details/deadspace_202504
+
+Dead Space Mobile Version 1.1.33
+https://archive.org/details/dead-space-mobile-ps-vita-1.1.33
+```
+
+Los dos ofrecen exactamente el mismo `deadspace.zip`: 145.903.794 bytes, SHA1
+`61d51d8ba5374f97b5a4971a2d9d7da31baf840c`. El segundo ítem agrega un VPK de
+Vita que el port de Linux no usa. Por lo tanto no son dos donors distintos y
+ninguno contiene la variante completa.
+
+Desde ahora la documentación distingue tres artefactos para evitar que el
+nombre repetido `deadspace.zip` induzca a sobrescribir uno con otro:
+
+```text
+Port ZIP       deadspace-portmaster.zip   libre, sin contenido de EA
+Complete donor árbol Xperia Play completo, 303 MiB importados
+Vita RIP donor deadspace.zip público, 247 MiB importados
+```
+
+La comparación por path encontró 25 archivos presentes sólo en Complete: los
+nueve paquetes UI `~2x`, cuatro mapas Survival, diez archivos de modelo/textura
+del Burst Rifle, `EurostileLTStd.ttf` y el mapa de prueba `00_test_respawn`.
+Vita RIP conserva los 103 MiB de sonidos y los archivos de la campaña, aunque
+algunos mapas, modelos, partículas, texturas y `level_index.sb` son variantes
+distintas. No se supone que esa diferencia sea invisible: a 640x480 la ausencia
+de UI `~2x` probablemente tenga poco impacto, pero Survival y Burst Rifle sí son
+contenido ausente y la apariencia sólo puede cerrarse con la prueba real.
+
+La receta eapx subió a v2. No se limitó a bajar el umbral: admite ambos tamaños
+y agrega hashes aceptados explícitos para `level_index.sb`, layouts, primer mapa
+de campaña, modelo del menú, frontend UI y base de audio, además de conservar el
+SHA256 exacto de la biblioteca y de `EAMCore.ini`. Resultados de planificación:
+
+```text
+Complete donor  1.771 items  317.682.271 bytes
+Vita RIP donor  1.746 items  259.247.380 bytes
+```
+
+El ZIP público se extrajo completo con eapx a un stage descartable, se publicó
+transaccionalmente y sus 1.746 items se verificaron después del commit. Bajo el
+harness llegó a M6/7: cargó el módulo, dibujó 600 frames, abrió 147 assets, hizo
+515 uploads de textura y 2.444 draws con framebuffer no negro. M7 registró cero
+cambios de escena porque el piloto automático no navegó el frontend variante;
+eso no se convirtió en un PASS artificial y queda como diferencia pendiente de
+la prueba de controles en hardware.
+
+El dry-run del launcher PortMaster real sí pasó de extremo a extremo con Vita
+RIP: importó biblioteca/assets, escribió marker y log, normalizó portada, cargó
+el juego, dibujó hasta su resumen, ejecutó `pm_finish` y no dejó gptokeyb vivo.
+El paquete libre resultante no contiene la biblioteca ni `assets/published`:
+
+```text
+build/deadspace.zip
+SHA256 7be3419bb45d22bcdaa7eb8b5fe615092d6dbd3cf67976d25dae2cfce267b762
+```
+
+Para ensayar una instalación nueva se borró exclusivamente el estado instalado
+de Dead Space de la SD: directorio completo (incluidos saves), launcher, portada
+global vieja y las dos entradas activas de `gamelist.xml`. El script
+`port/tools/clean_deadspace_gamelist.py` exige encontrar exactamente los paths
+`./Dead Space.sh` y `./deadspace/grab_screen.sh`; la limpieza pasó de 21 a 19
+entradas y no tocó ningún otro juego ni los backups históricos del gamelist.
+
+El estado preinstalación que se entrega a la consola contiene únicamente:
+
+```text
+/roms/tools/PortMaster/autoinstall/deadspace-portmaster.zip  # nuestro port
+/roms/ports/deadspace/deadspace.zip                          # Vita RIP donor
+```
+
+Ambos ZIP pasaron `unzip -t`; el donor conserva internamente la biblioteca SHA1
+`0ed42b611415015807f759ec9b5457857143ce39`. No hay launcher, assets extraídos,
+`var/`, portada global ni entrada de menú antes de abrir PortMaster. La prueba
+pendiente es abrir PortMaster, dejar que consuma el ZIP de autoinstall, reiniciar
+y lanzar el juego: el primer arranque debe importar Vita RIP y permitir navegar
+manualmente el frontend que M7 automático no pudo atravesar.
