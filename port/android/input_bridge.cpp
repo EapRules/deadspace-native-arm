@@ -79,6 +79,22 @@ static int16_t g_lx = 0, g_ly = 0, g_rx = 0, g_ry = 0;
 static Uint8 g_accept_button = SDL_CONTROLLER_BUTTON_B;
 static Uint8 g_back_button = SDL_CONTROLLER_BUTTON_A;
 
+/*
+ * Dead Space's menus are touch-only. The Vita port uses the front touchscreen
+ * and explicitly documents that a pad cannot navigate them. R36S has no touch
+ * panel, so the d-pad drives this software cursor and physical A taps it.
+ *
+ * The cursor starts visible for the title/menu. Moving either analog stick
+ * means gameplay and dismisses it; L3 brings it back when a menu is opened.
+ */
+static const int kCursorPointerId = 3;
+static const float kCursorSpeed = 420.0f;
+static float g_cursor_x = -1.0f, g_cursor_y = -1.0f;
+static int g_cursor_dx = 0, g_cursor_dy = 0;
+static bool g_cursor_visible = false;
+static bool g_cursor_down = false;
+static Uint32 g_cursor_last_ms = 0;
+
 static bool g_autopilot = false;
 static long g_auto_keys = 0;
 static long g_auto_scenes = 0;
@@ -143,6 +159,74 @@ static void send_pointer(int raw_event, int module, int id, float x, float y)
         g_pointer(g_env, (void *)0x42424242, raw_event, module, id, x, y);
 }
 
+static void cursor_show(void)
+{
+    if (!g_cursor_visible) {
+        g_cursor_x = g_width * 0.5f;
+        g_cursor_y = g_height * 0.5f;
+        trace("input: menu cursor shown at %.0f,%.0f", g_cursor_x, g_cursor_y);
+    }
+    g_cursor_visible = true;
+    g_cursor_last_ms = SDL_GetTicks();
+}
+
+static void cursor_hide(void)
+{
+    if (g_cursor_down) {
+        send_pointer(ID_RAW_POINTER_UP, MODULE_TOUCH_SCREEN, kCursorPointerId,
+                     g_cursor_x, g_cursor_y);
+        g_cursor_down = false;
+    }
+    if (g_cursor_visible)
+        trace("input: menu cursor hidden");
+    g_cursor_visible = false;
+    g_cursor_dx = 0;
+    g_cursor_dy = 0;
+}
+
+static void cursor_tap(bool down)
+{
+    if (!g_cursor_visible)
+        return;
+    send_pointer(down ? ID_RAW_POINTER_DOWN : ID_RAW_POINTER_UP,
+                 MODULE_TOUCH_SCREEN, kCursorPointerId,
+                 g_cursor_x, g_cursor_y);
+    g_cursor_down = down;
+    trace("input: menu tap %s at %.0f,%.0f",
+          down ? "down" : "up", g_cursor_x, g_cursor_y);
+}
+
+void android_input_tick(void)
+{
+    Uint32 now = SDL_GetTicks();
+    if (!g_cursor_last_ms)
+        g_cursor_last_ms = now;
+    float dt = (now - g_cursor_last_ms) / 1000.0f;
+    g_cursor_last_ms = now;
+
+    if (!g_cursor_visible || (!g_cursor_dx && !g_cursor_dy))
+        return;
+
+    g_cursor_x += g_cursor_dx * kCursorSpeed * dt;
+    g_cursor_y += g_cursor_dy * kCursorSpeed * dt;
+    g_cursor_x = std::max(0.0f, std::min(g_cursor_x, (float)g_width - 1.0f));
+    g_cursor_y = std::max(0.0f, std::min(g_cursor_y, (float)g_height - 1.0f));
+
+    if (g_cursor_down)
+        send_pointer(ID_RAW_POINTER_MOVE, MODULE_TOUCH_SCREEN, kCursorPointerId,
+                     g_cursor_x, g_cursor_y);
+}
+
+extern "C" void android_input_cursor_position(float *x, float *y, int *visible)
+{
+    if (x)
+        *x = g_cursor_x;
+    if (y)
+        *y = g_cursor_y;
+    if (visible)
+        *visible = g_cursor_visible ? 1 : 0;
+}
+
 static void update_sticks(void)
 {
     if (!g_pointer)
@@ -164,6 +248,10 @@ static void update_sticks(void)
     float right_y = right_base_y - g_height * (105.0f / 544.0f) * ry;
 
     bool left_now = lx != 0.0f || ly != 0.0f;
+    bool right_now = rx != 0.0f || ry != 0.0f;
+    if (left_now || right_now)
+        cursor_hide();
+
     if (left_now && !g_left_active)
         send_pointer(ID_RAW_POINTER_DOWN, MODULE_TOUCH_SCREEN, 1,
                      left_base_x, left_base_y);
@@ -175,7 +263,6 @@ static void update_sticks(void)
                      left_x, left_y);
     g_left_active = left_now;
 
-    bool right_now = rx != 0.0f || ry != 0.0f;
     if (right_now && !g_right_active)
         send_pointer(ID_RAW_POINTER_DOWN, MODULE_TOUCH_PAD, 2,
                      right_base_x, right_base_y);
@@ -249,6 +336,9 @@ void android_input_init(so_module *mod, JNIEnv *env, int width, int height)
           available, opened,
           g_accept_button == SDL_CONTROLLER_BUTTON_B ? "Nintendo" : "Xbox",
           g_autopilot ? " autopilot=on" : "");
+
+    cursor_show();
+    trace("input: menus use d-pad cursor + physical A tap; L3 toggles cursor");
 }
 
 bool android_input_event(const SDL_Event *event)
@@ -275,12 +365,56 @@ bool android_input_event(const SDL_Event *event)
         break;
     case SDL_CONTROLLERBUTTONDOWN:
     case SDL_CONTROLLERBUTTONUP: {
+        bool down = event->type == SDL_CONTROLLERBUTTONDOWN;
+        Uint8 button = event->cbutton.button;
+
+        if (button == SDL_CONTROLLER_BUTTON_LEFTSTICK) {
+            if (down) {
+                if (g_cursor_visible)
+                    cursor_hide();
+                else
+                    cursor_show();
+            }
+            trace("input: controller button=%u %s -> menu cursor toggle",
+                  (unsigned int)button, down ? "down" : "up");
+            break;
+        }
+
+        if (g_cursor_visible) {
+            switch (button) {
+            case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+                g_cursor_dx = down ? -1 : (g_cursor_dx < 0 ? 0 : g_cursor_dx);
+                break;
+            case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+                g_cursor_dx = down ? 1 : (g_cursor_dx > 0 ? 0 : g_cursor_dx);
+                break;
+            case SDL_CONTROLLER_BUTTON_DPAD_UP:
+                g_cursor_dy = down ? -1 : (g_cursor_dy < 0 ? 0 : g_cursor_dy);
+                break;
+            case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+                g_cursor_dy = down ? 1 : (g_cursor_dy > 0 ? 0 : g_cursor_dy);
+                break;
+            default:
+                break;
+            }
+            if (button >= SDL_CONTROLLER_BUTTON_DPAD_UP &&
+                button <= SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
+                trace("input: controller button=%u %s -> menu cursor",
+                      (unsigned int)button, down ? "down" : "up");
+                break;
+            }
+            if (button == g_accept_button) {
+                cursor_tap(down);
+                break;
+            }
+        }
+
         int code = map_button(event->cbutton.button);
         trace("input: controller button=%u %s -> Android key=%d",
               (unsigned int)event->cbutton.button,
-              event->type == SDL_CONTROLLERBUTTONDOWN ? "down" : "up", code);
+              down ? "down" : "up", code);
         if (code)
-            send_key(code, event->type == SDL_CONTROLLERBUTTONDOWN);
+            send_key(code, down);
         break;
     }
     case SDL_CONTROLLERAXISMOTION:

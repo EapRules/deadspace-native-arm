@@ -50,15 +50,21 @@ Vita port:
 
 | R36S control | Android/game input |
 |---|---|
-| D-pad | D-pad |
-| A | D-pad center / accept |
+| D-pad | Move visible cursor while it is shown |
+| A | Touch/click at cursor; game A when cursor is hidden |
 | B | Back |
 | X / Y | Xperia Play X / Y |
 | L1 / R1 | Shoulder buttons |
 | Start | Start |
 | Select | Select |
+| L3 | Show/hide menu cursor |
 | Left stick | Virtual touchscreen movement stick |
 | Right stick | Virtual touchpad aiming stick |
+
+Dead Space's menus are touch-only even in the working Vita port. The cursor
+starts at the centre of the title screen. Move it with the D-pad and press A
+to tap. Moving either analog stick hides it for gameplay; press L3 to bring it
+back when a menu needs touch input.
 
 `deadspace.gptk` intentionally leaves game buttons unbound. It runs only so
 PortMaster's standard exit combination can terminate the process.

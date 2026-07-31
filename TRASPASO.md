@@ -514,3 +514,68 @@ El binario de diagnóstico instalado directamente en la SD tiene SHA256:
 ```text
 9b8d8ad942c7027014d31cf881388c1fe9ab771ccc3c4ee3292c94afa53d83db
 ```
+
+### 11.10 Segundo ensayo: causa de geometría y menús táctiles
+
+El log completo del segundo ensayo en R36S dio la evidencia que faltaba:
+
+```text
+TRACE: window geometry: logical=640x480 drawable=640x480
+TRACE: DisplayAndroidDelegate constructed (640x480 @ 229 dpi)
+TRACE: GL viewport: x=0 y=0 width=480 height=640
+TRACE: controller: GO-Super Gamepad
+TRACE: input bridge: JNI keys=yes pointer=yes joysticks=1 controllers=1
+```
+
+No hubo crash y el motor llegó al menos a 4900 frames. El mando abrió
+correctamente y todos los botones ensayados produjeron eventos SDL. El botón
+físico A llegó como SDL button 1 y fue traducido a Android key 23, tal como se
+esperaba para el layout Nintendo.
+
+#### Geometría
+
+La pantalla desplazada no era un problema del driver Mali ni frames ausentes.
+La ventana física era correcta, pero el motor intercambiaba ancho y alto al
+crear su viewport.
+
+`DisplayAndroidDelegate.GetDefaultWidth/Height` representa las dimensiones
+naturales de un dispositivo Android antes de aplicar orientación. El port de
+Vita lo demuestra: para su framebuffer 960x544 informa 544x960. Nuestro
+delegado informaba directamente 640x480, por lo que el motor lo rotaba a
+480x640.
+
+La corrección está en
+`port/jni/classes/ea_DisplayAndroidDelegate.cpp`: se informa 480x640 para que
+el motor produzca el viewport físico 640x480. No se fuerza ni intercepta el
+viewport; se corrige el dato que lo originaba.
+
+#### Menús
+
+El README y el código del port de Vita confirman que los menús originales no
+aceptan navegación de gamepad; en Vita se operan con la pantalla táctil. Por
+eso recibir correctamente Android key 23 no bastaba para avanzar.
+
+`port/android/input_bridge.cpp` y `port/android/cursor_draw.cpp` implementan el
+equivalente PortMaster para una consola sin táctil:
+
+- el cursor empieza visible en el centro;
+- la cruceta lo mueve;
+- A llama `TouchSurfaceAndroid.NativeOnPointerEvent` con down/up;
+- L3 muestra u oculta el cursor;
+- mover cualquiera de los sticks lo oculta y entrega los sticks al control
+  táctil/touchpad del gameplay.
+
+El cursor se dibuja sobre el framebuffer con GLES 1.1 puro mediante
+`glScissor` + `glClear`. Guarda y restaura framebuffer, scissor, clear color y
+color mask; no usa shaders GLES2. La sonda M6 se ejecuta antes del overlay para
+que el cursor no pueda convertir una pantalla negra en un falso positivo.
+
+Con el cursor visible durante los 600 frames, el harness inmutable volvió a
+pasar M7/7:
+
+```text
+[verify] M6 ok (assets=84 textures=11 draws=35721, survived)
+[verify] M7 autopilot: injected 12 keys over 600 frames, scene changed 3 time(s)
+[verify] M7 ok
+[verify] === milestone reached: 7 / 7 ===
+```

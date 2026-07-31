@@ -12,6 +12,8 @@ struct so_module;
  */
 void android_input_init(so_module *mod, _JNIEnv *env, int width, int height);
 bool android_input_event(const SDL_Event *event);
+void android_input_tick(void);
+extern "C" void android_input_cursor_position(float *x, float *y, int *visible);
 void android_input_autopilot_tick(long frame);
 void android_input_autopilot_sample(long frame);
 long android_input_autopilot_keys(void);

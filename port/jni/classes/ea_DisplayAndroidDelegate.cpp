@@ -9,26 +9,21 @@
 /*
  * The panel the engine is told about.
  *
- * These are the R36S defaults and they match the surface the loader actually
- * creates, which is the honest answer: whatever the engine lays out, it lays
- * out onto that surface.
+ * These are the panel dimensions in Android's natural portrait orientation,
+ * not the current landscape framebuffer dimensions.
  *
- * The Vita port answers differently and it is worth recording why the
- * divergence is deliberate rather than an oversight. Its screen is 960x544 and
- * it reports 544x960 - the portrait "natural" orientation an Android phone
- * would report, with the engine expected to rotate. That build works, so the
- * engine clearly tolerates it, but it is a second unknown stacked on top of
- * the first and there is no reason to inherit it: our surface is landscape and
- * we say so.
+ * This distinction was measured on the R36S. Reporting the physical surface
+ * as 640x480 made the engine call glViewport(0, 0, 480, 640) on a 640x480
+ * window, visibly shifting and cropping the image. The working Vita port uses
+ * the same convention: its 960x544 surface is reported here as 544x960. The
+ * engine performs the orientation swap itself, so this panel must likewise be
+ * reported as 480x640 to produce a 640x480 viewport.
  *
- * If it turns out wrong on the console the symptom is layout, not a crash - a
- * stretched or rotated HUD - and the env vars exist so that costs one reboot
- * instead of one rebuild and another card trip. That is the Ice Rage lesson:
- * every trip to the device should carry as many answerable questions as
- * possible.
+ * The env vars remain available for diagnostics, but their values use this
+ * same natural-orientation convention.
  */
-static const int kDefaultWidth  = 640;
-static const int kDefaultHeight = 480;
+static const int kDefaultWidth  = 480;
+static const int kDefaultHeight = 640;
 
 /*
  * 229 dpi: the panel is 3.5" diagonal at 640x480, so sqrt(640^2 + 480^2) / 3.5.

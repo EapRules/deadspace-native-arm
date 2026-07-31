@@ -105,9 +105,16 @@ either `/roms` or `/roms2`.
 This binary has no `AInputQueue` imports. Input is delivered through its
 exported JNI entry points, matching the working Vita port:
 
-- D-pad and buttons → `KeyboardAndroid.NativeOnKeyDown/Up`
+- title/menus: D-pad moves a visible software cursor, A taps it
+- L3 toggles the menu cursor after it has been dismissed
+- buttons outside cursor mode → `KeyboardAndroid.NativeOnKeyDown/Up`
 - left stick → virtual touchscreen movement stick
 - right stick → virtual touchpad aiming stick
+
+The original game's menus do not support gamepad navigation; the Vita port
+uses its physical touchscreen. The cursor is therefore a required input
+bridge on non-touch PortMaster handhelds, not optional decoration. Moving
+either analog stick dismisses it so the same controls can drive gameplay.
 
 The pointer callback uses base AAPCS because the game is softfp and the loader
 is hardfp.

@@ -52,6 +52,7 @@
 #include "classes/media_AudioTrack.h"
 
 #include "crash.h"
+#include "cursor_draw.h"
 #include "fb_probe.h"
 #include "fix_path.h"
 #include "input_bridge.h"
@@ -478,6 +479,7 @@ int main(int argc, char **argv)
                 goto done;
         }
 
+        android_input_tick();
         android_input_autopilot_tick(frames);
 
         /* The first frame gets its own line. "surface created" followed by
@@ -502,6 +504,7 @@ int main(int argc, char **argv)
             SDL_GL_GetDrawableSize(window, &w, &h);
             android_fb_probe(frames, w, h);
             android_input_autopilot_sample(frames);
+            android_cursor_draw(w, h);
             SDL_GL_SwapWindow(window);
         }
 
