@@ -1244,3 +1244,46 @@ Ambos ZIP pasaron `unzip -t`; el donor conserva internamente la biblioteca SHA1
 pendiente es abrir PortMaster, dejar que consuma el ZIP de autoinstall, reiniciar
 y lanzar el juego: el primer arranque debe importar Vita RIP y permitir navegar
 manualmente el frontend que M7 automático no pudo atravesar.
+
+### 11.20 Resultado real del autoinstall limpio: dos fallos separados
+
+Actualización del 2026-07-31 por **ChatGPT/Codex**, a partir del reporte de
+EapRules y verificación directa de la SD después de volver a montarla. La prueba
+de 11.19 no pasó en hardware:
+
+1. PortMaster detectó y consumió el ZIP de `autoinstall/`.
+2. Después del reinicio apareció Dead Space en Ports.
+3. Todos los ports aparecieron sin portada.
+4. Dead Space mostró negro y volvió inmediatamente al frontend.
+
+La SD permite separar los dos síntomas. El fallo de Dead Space ocurre antes del
+launcher: `/roms/ports/Dead Space.sh` es un archivo regular de **0 bytes**. En
+cambio, el launcher dentro del ZIP local mide 7.282 bytes y tiene SHA256
+`7a6860b5bfab57b5ea1d7d8400d0afe0ed8a0b50c619f1818a3909dd880bcd20`.
+El binario instalado mide 7.215.740 bytes, el donor público de 145.903.794 bytes
+sigue presente y no hay salida de `log.txt` ni `eapx.log`. Por lo tanto el
+importador eapx y el juego **nunca se ejecutaron**; no corresponde investigar el
+motor, el RIP ni los gráficos hasta corregir la instalación del `.sh`.
+
+El fallo de artwork también está confirmado, pero su causa todavía no. El
+`/roms/ports/gamelist.xml` activo mide 329 bytes: contiene sólo dos juegos (Ice
+Rage y Dead Space) y cero elementos `<image>`. `gamelist.xml.bak` y
+`gamelist.xml.old` quedaron ambos en 0 bytes. Las imágenes no demostraron estar
+dañadas; se perdió el catálogo que las referencia. Hay una copia manual
+recuperable, `gamelist.xml.before-deadspace-20260730`, con 19 juegos y 13
+referencias de imagen.
+
+Existe un antecedente escrito por Claude Code el 2026-07-28 en `METADATA.md`:
+EmulationStation ya había reducido este gamelist a dos entradas al arrancar sin
+ver correctamente la SD2 o con `es_systems.cfg` en un estado mixto. El patrón es
+prácticamente idéntico y hace plausible otra reescritura de EmulationStation,
+pero esa nota es tres días anterior y **no prueba** que haya ocurrido lo mismo en
+esta ejecución. Tampoco hay evidencia suficiente para afirmar que PortMaster
+destruyó el gamelist: eso queda como hipótesis abierta hasta reconstruir la
+secuencia de escrituras.
+
+Estado al pausar para documentar: no se modificó todavía la SD. Próximos pasos:
+reproducir la extracción y la firma que PortMaster aplica al launcher, corregir
+el paquete, agregar una prueba que rechace un `.sh` vacío, reconstruir el
+gamelist desde la copia de 19 entradas preservando historial y comprobar un
+autoinstall limpio antes de volver a expulsar la tarjeta.
