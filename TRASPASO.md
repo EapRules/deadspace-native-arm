@@ -805,10 +805,28 @@ requiere la prueba de controles en la R36S.
 ### 11.15 Audio: SDL sin inicializar y short vectors VFP en ARMv8
 
 **Autoría:** ChatGPT/Codex implementó la inicialización/salida SDL y el
-expansor VFP. Una sesión concurrente agregó el digest PCM y el escape hatch
-`DEADSPACE_NO_VFP_PATCH`; ambos se conservaron porque hacen falsable la
-comparación A/B. La atribución a VFPVector corresponde a su autor original,
-Bythos14, y su licencia MIT se incluye en `port/third_party/vfpvector/`.
+expansor VFP. Una sesión concurrente agregó el digest PCM, el escape hatch
+`DEADSPACE_NO_VFP_PATCH`, el self-test de registros y la auditoría independiente
+de cobertura; se conservaron porque hacen falsable el parche. La atribución a
+VFPVector corresponde a su autor original, Bythos14, y su licencia MIT se
+incluye en `port/third_party/vfpvector/`.
+
+Los hashes no separan esa autoría de forma perfecta porque ambas sesiones
+compartían el mismo working tree:
+
+- `9045dc0` es **mixto**. ChatGPT/Codex hizo la inicialización SDL, selección de
+  device, período/back-pressure, validaciones y el expansor VFP base. La otra
+  sesión ya había dejado dentro de los mismos archivos el self-test VFP y el
+  cambio que mide PCM antes de abandonar por `deviceId == 0`; al commitear se
+  incluyeron juntos.
+- `ffd9348` es principalmente de la sesión concurrente: agrega
+  `analysis/vfp_coverage.py` y la explicación en `HALLAZGOS.md`. La enmienda de
+  ChatGPT/Codex sólo inicializa defensivamente la variable local
+  `instruction` del encoder.
+
+No se reescribió el historial para separarlos: estos puntos son la fuente de
+verdad de atribución y permiten conservar exactamente el estado que pasó las
+pruebas.
 
 El primer defecto era independiente de la aritmética del mixer y explica por
 sí solo que no hubiera ningún sonido. `src/main.cpp` hacía:
@@ -863,21 +881,23 @@ El decoder/generador se adaptó de Bythos14/VFPVector, commit `d95ba13`
 excepciones de Vita: Linux/ARMv8 acepta silenciosamente estas instrucciones,
 por lo que este loader aplica una lista eager y específica para el SHA1 fijado.
 
-Prueba A/B local:
+Verificación local en dos direcciones:
 
-- patch activo: `VFP short vectors: expanded 40/40 audio instructions`;
-- referencia qemu: `DEADSPACE_NO_VFP_PATCH=1`;
-- ambos abrieron dummy SDL exactamente a 44.100 Hz, 2 canales, S16 y período
-  1.024;
-- los digests coincidieron en todos los checkpoints fijos hasta 524.288
-  muestras; por ejemplo `write=512 digest=0feb61957bfd0383`.
+- `DEADSPACE_VFP_SELFTEST=1` arma stubs ejecutables y corre cada opcode
+  short-vector original y su expansión escalar con los mismos 32 registros;
+  exige igualdad registro por registro y además verifica que qemu realmente
+  vectorizó el lado de referencia: **40/40 exactas**;
+- `python3 port/analysis/vfp_coverage.py` reconstruye las 20 regiones LEN desde
+  `dis/all.dis`: encontró 40 operaciones aritméticas, 40 cubiertas, 0 faltantes,
+  0 entradas fuera de región y todas las palabras exactas;
+- el dummy SDL abrió exactamente a 44.100 Hz, 2 canales, S16 y período 1.024.
 
-El menú local produjo silencio en esos checkpoints; los `.sps` de música no se
-abren hasta avanzar al juego. Hubo señal mínima después, pero no se usa como
-prueba audible. Lo demostrado localmente es que el device abre, la cola se
-consume a tiempo real y la expansión ARMv8 entrega exactamente el mismo PCM
-que los short vectors originales de qemu para la misma cantidad de muestras.
-La salida por el parlante ALSA real queda como prueba de hardware.
+El menú local produjo silencio durante los primeros checkpoints; los `.sps` de
+música no se abren hasta avanzar al juego. Los digests con/sin patch coinciden
+durante esos ceros, pero luego dependen del tiempo de juego y no son un oráculo
+aritmético reproducible. Para eso se usa el self-test de registros anterior.
+Lo demostrado en el camino SDL es que el device abre y la cola se consume a
+tiempo real. La salida por el parlante ALSA real queda como prueba de hardware.
 
 Corrida final del árbitro inmutable con estos cambios:
 

@@ -42,10 +42,13 @@ physical controller.
 The local container uses SDL's dummy audio output. It consumes the exact queued
 PCM at real time without requiring access to the Mac audio device; the log
 reports the obtained format and bounded PCM signal metrics for audio debugging.
-To compare the ARMv8 scalar VFP expansion against qemu's implementation of the
-original short vectors, run the same fixed-frame scenario with and without
-`DEADSPACE_NO_VFP_PATCH=1` and compare `AudioTrack: PCM` digest checkpoints.
-That switch is diagnostic only; the R36S requires the patch.
+`DEADSPACE_VFP_SELFTEST=1` makes qemu execute each original short-vector opcode
+and its scalar expansion from identical VFP register state. It must report
+40/40 exact. `analysis/vfp_coverage.py` independently proves that the patch
+list covers every arithmetic opcode in all 20 LEN regions. The
+`DEADSPACE_NO_VFP_PATCH=1` switch is diagnostic only; PCM digests are useful
+for queue telemetry but diverge with elapsed game time after startup silence,
+so they are not the arithmetic oracle. The R36S requires the patch.
 
 For per-call GLES error attribution:
 

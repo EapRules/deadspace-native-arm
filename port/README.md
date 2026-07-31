@@ -164,9 +164,11 @@ hardware period and requested a roughly six-second buffer. Audio now has
 explicit initialization, device enumeration/fallback and a 1024-frame period.
 The game's 40 obsolete VFP short-vector mixer instructions are expanded into
 validated scalar A32 trampolines for the Cortex-A35, which ignores FPSCR
-LEN/STRIDE. Patched and original qemu runs produced identical PCM digests at
-fixed checkpoints through 524,288 samples. The local dummy device confirms the
-queue is consumed in real time; audible speaker output awaits the R36S test.
+LEN/STRIDE. A qemu register-level self-test proves all 40 expansions reproduce
+the original vector operations, while a disassembly audit proves the list
+covers all 40 arithmetic opcodes in all 20 LEN regions. The local dummy device
+confirms the queue is consumed in real time; audible speaker output awaits the
+R36S test.
 
 ## Interactive local emulator
 
