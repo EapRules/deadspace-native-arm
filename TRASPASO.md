@@ -312,10 +312,20 @@ build/deadspace-portmaster.zip
 loader, metadatos y diez librerías redistribuibles; no contiene
 `libEAMGameDeadSpace.so` ni `assets/published`.
 
-Al intentar desplegarla, `/Volumes/ROMS` no existía y
-`diskutil list external physical` no mostraba ningún dispositivo. Por lo tanto
-no se escribió ni expulsó una tarjeta en ese momento. Copiar, comparar hashes,
-`sync` y expulsar quedan pendientes hasta que macOS vuelva a detectar la SD.
+El primer intento de despliegue no encontró ningún dispositivo externo. Tras
+reinsertar la tarjeta, macOS montó `/dev/disk4s1` (exFAT) en `/Volumes/ROMS`.
+Se preservaron `assets/`, `lib/`, `var/`, launcher y GPTK; sólo se actualizaron:
+
+```text
+/Volumes/ROMS/ports/deadspace/deadspace
+/Volumes/ROMS/ports/deadspace/README.md
+/Volumes/ROMS/backup/deadspace-portmaster-M7.zip
+```
+
+Los tres destinos coincidieron byte por byte (`cmp=0`) y por SHA-256 con sus
+fuentes. Se eliminaron únicamente los cuatro metadatos AppleDouble creados por
+macOS (`._deadspace`, `._README.md` y `._deadspace-portmaster-M7.zip`). Después
+se ejecutó `sync` y el volumen se expulsó con `diskutil eject`.
 
 El harness no fue modificado. También se ejecutó un dry-run del launcher en un
 contenedor PortMaster descartable, quitando del sistema las bibliotecas que el
