@@ -170,6 +170,13 @@ covers all 40 arithmetic opcodes in all 20 LEN regions. The local dummy device
 confirms the queue is consumed in real time; audible speaker output awaits the
 R36S test.
 
+Current device-test binary:
+
+```text
+SHA256 92b55dfca095dffcb26fa4074547dfb9bec4b7110853fd84ccb337dae5a2078c
+size   7212196 bytes
+```
+
 ## Interactive local emulator
 
 `emulator/run.sh` keeps the qemu-arm + Mesa build alive and exposes cursor,

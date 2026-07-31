@@ -291,6 +291,32 @@ Corrida final del árbitro de solo lectura `port/harness/verify.sh`:
 [verify] === milestone reached: 7 / 7 ===
 ```
 
+La candidata armhf empaquetada después de esa corrida:
+
+```text
+commits:
+  9045dc0  audio/VFP (commit mixto; ver autoría arriba)
+  ffd9348  self-test/cobertura (principalmente sesión concurrente)
+  e55e188  atribución, prueba final y passthrough del self-test
+
+build/deadspace
+  7212196 bytes
+  SHA256 92b55dfca095dffcb26fa4074547dfb9bec4b7110853fd84ccb337dae5a2078c
+
+build/deadspace-portmaster.zip
+  5195229 bytes
+  SHA256 39751166aad2b140d49d97297f470bfdfe4a2ee86adc23ab13e93dea035fab7c
+```
+
+`unzip -t` validó todos los miembros. El listado contiene únicamente launcher,
+loader, metadatos y diez librerías redistribuibles; no contiene
+`libEAMGameDeadSpace.so` ni `assets/published`.
+
+Al intentar desplegarla, `/Volumes/ROMS` no existía y
+`diskutil list external physical` no mostraba ningún dispositivo. Por lo tanto
+no se escribió ni expulsó una tarjeta en ese momento. Copiar, comparar hashes,
+`sync` y expulsar quedan pendientes hasta que macOS vuelva a detectar la SD.
+
 El harness no fue modificado. También se ejecutó un dry-run del launcher en un
 contenedor PortMaster descartable, quitando del sistema las bibliotecas que el
 paquete afirma transportar; pasó carga del módulo, resumen final, limpieza de
