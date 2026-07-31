@@ -39,6 +39,14 @@ both lines immediately.
 MCP server uses this protocol; it does not need keyboard focus, X11, VNC or a
 physical controller.
 
+The local container uses SDL's dummy audio output. It consumes the exact queued
+PCM at real time without requiring access to the Mac audio device; the log
+reports the obtained format and bounded PCM signal metrics for audio debugging.
+To compare the ARMv8 scalar VFP expansion against qemu's implementation of the
+original short vectors, run the same fixed-frame scenario with and without
+`DEADSPACE_NO_VFP_PATCH=1` and compare `AudioTrack: PCM` digest checkpoints.
+That switch is diagnostic only; the R36S requires the patch.
+
 For per-call GLES error attribution:
 
 ```bash

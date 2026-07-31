@@ -52,10 +52,14 @@ exec docker run --rm \
     -v "$CONTROL_DIR":/control \
     -w /src \
     -e SDL_VIDEODRIVER=offscreen \
+    -e SDL_AUDIODRIVER=dummy \
     -e LIBGL_ALWAYS_SOFTWARE=1 \
     -e GALLIUM_DRIVER=llvmpipe \
     -e EGL_PLATFORM=surfaceless \
     -e LOADER_TRACE=1 \
+    -e DEADSPACE_AUTOPILOT="${DEADSPACE_AUTOPILOT:-}" \
+    -e DEADSPACE_FRAME_LIMIT="${DEADSPACE_FRAME_LIMIT:-}" \
+    -e DEADSPACE_NO_VFP_PATCH="${DEADSPACE_NO_VFP_PATCH:-}" \
     -e DEADSPACE_CONTROL_DIR=/control \
     -e DEADSPACE_GL_DIAG="${DEADSPACE_GL_DIAG:-}" \
     "$IMAGE" \

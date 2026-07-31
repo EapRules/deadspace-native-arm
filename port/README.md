@@ -17,22 +17,26 @@ scaffold that used to occupy some of this repository.
 ## Current status
 
 The immutable harness reaches **M7/7** under qemu-arm + llvmpipe. The latest
-PVRTC-fallback run reported:
+run, with real-time dummy audio consumption and the ARMv8 VFP compatibility
+patch enabled, reported:
 
 ```text
-570 frames
+375 frames
 84 successful content opens
-151 texture uploads
-35,049 draw calls
+168 texture uploads
+22,009 draw calls
 non-black framebuffer
-11 synthetic JNI keys
-3 measured scene changes
+7 synthetic JNI keys
+2 measured scene changes
 ```
 
 That proves startup, content loading, rendering and input-driven progression in
 the harness. The PVRTC fallback is also confirmed on the real R36S Mali-G31:
 the previously white characters, objects and backgrounds now render correctly.
-Audio, saves and a complete play-through still require device testing.
+The current candidate also initializes SDL audio, uses a bounded hardware
+period and expands the obsolete VFP short-vector mixer operations for ARMv8.
+Audio output, the new cursor/camera behavior, saves and a complete play-through
+still require device testing.
 
 The full investigation history and explicit split between Claude's work and
 ChatGPT/Codex's M4→M7 work is in [`../TRASPASO.md`](../TRASPASO.md).
@@ -151,8 +155,18 @@ controls: the provisional cross cursor could not be recovered after analog
 input, and a held right stick produced only one finite camera gesture. The next
 candidate replaces the cross with a high-contrast arrow, restores it with
 L3/R3 or Start, refreshes sticks every frame and reproduces the Vita port's
-per-frame right-touchpad gesture. These changes are locally verified and await
-the next R36S test. Audio remains the outstanding subsystem.
+per-frame right-touchpad gesture.
+
+The same candidate addresses the silent audio path. `AudioTrack` used to call
+`SDL_OpenAudioDevice` without ever initializing `SDL_INIT_AUDIO`, then silently
+kept device ID zero. It also confused the engine's 1 MiB producer ring with a
+hardware period and requested a roughly six-second buffer. Audio now has
+explicit initialization, device enumeration/fallback and a 1024-frame period.
+The game's 40 obsolete VFP short-vector mixer instructions are expanded into
+validated scalar A32 trampolines for the Cortex-A35, which ignores FPSCR
+LEN/STRIDE. Patched and original qemu runs produced identical PCM digests at
+fixed checkpoints through 524,288 samples. The local dummy device confirms the
+queue is consumed in real time; audible speaker output awaits the R36S test.
 
 ## Interactive local emulator
 
@@ -173,6 +187,10 @@ Every device launch writes `ports/deadspace/log.txt`. Important lines:
 ```text
 TRACE: module loaded
 TRACE: mounted extracted content at /published
+TRACE: VFP short vectors: expanded 40/40 audio instructions
+TRACE: AudioTrack: SDL audio ready driver=...
+TRACE: AudioTrack: opened device=...
+TRACE: AudioTrack: PCM write=...
 TRACE: framebuffer non-black
 TRACE: summary assets=N textures=N draws=N
 FATAL: ...

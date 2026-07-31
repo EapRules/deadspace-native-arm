@@ -1,12 +1,11 @@
 # Dead Space — traspaso técnico
 
-Estado actual (actualización ChatGPT/Codex, 2026-07-30): **M7 de 7**. El
-verificador inmutable completó 570 frames en la última corrida, cargó
-contenido, procesó 151 uploads de textura, dibujó una imagen no negra y
-demostró tres cambios de escena después de input JNI sintético. El render 3D
-blanco fue atribuido a PVRTC no soportado, corregido y verificado visualmente
-en el emulador local; la build candidata está en la SD pendiente de
-confirmación sobre Mali-G31.
+Estado actual (actualización ChatGPT/Codex, 2026-07-31): **M7 de 7**. El
+verificador inmutable completó 375 frames con consumo de audio en tiempo real,
+cargó contenido, procesó 168 uploads de textura, hizo 22.009 draws y demostró
+dos cambios de escena después de input JNI sintético. El fallback PVRTC ya fue
+confirmado en la Mali-G31 real. La candidata siguiente corrige cursor, cámara
+continua y el camino de audio; esas tres partes esperan la prueba en R36S.
 
 Este documento es para que otro agente continúe sin repetir nada. Lo que está en
 `HALLAZGOS.md` es el triage del juego; esto es el estado de la investigación.
@@ -802,3 +801,94 @@ el menú 3D ya texturado. En una segunda ejecución, mantener el stick derecho
 durante dos segundos produjo **77 pulsos consecutivos de frame** antes del
 release; ya no depende de nuevos eventos de eje. Esta candidata todavía
 requiere la prueba de controles en la R36S.
+
+### 11.15 Audio: SDL sin inicializar y short vectors VFP en ARMv8
+
+**Autoría:** ChatGPT/Codex implementó la inicialización/salida SDL y el
+expansor VFP. Una sesión concurrente agregó el digest PCM y el escape hatch
+`DEADSPACE_NO_VFP_PATCH`; ambos se conservaron porque hacen falsable la
+comparación A/B. La atribución a VFPVector corresponde a su autor original,
+Bythos14, y su licencia MIT se incluye en `port/third_party/vfpvector/`.
+
+El primer defecto era independiente de la aritmética del mixer y explica por
+sí solo que no hubiera ningún sonido. `src/main.cpp` hacía:
+
+```text
+SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER)
+```
+
+pero el constructor falso de `android/media/AudioTrack` llamaba directamente
+`SDL_OpenAudioDevice`. Sin `SDL_INIT_AUDIO`, SDL devuelve device ID 0. El shim
+no comprobaba ni registraba ese resultado: `EAAudioCore init done` sólo
+demostraba que el mixer había arrancado, no que existiera una salida.
+
+La corrección en `jni/classes/media_AudioTrack.cpp`:
+
+- inicializa explícitamente `SDL_INIT_AUDIO`;
+- registra driver, endpoints y formato solicitado/obtenido;
+- prueba el endpoint por defecto y, si falla, endpoints enumerados, priorizando
+  los que no sean HDMI y reintentando temporalmente cuando ALSA informa busy;
+- permite forzar un nombre SDL con `DEADSPACE_AUDIODEV`;
+- valida tipo y rango del `short[]` antes de leerlo;
+- informa señal, pico, media cuadrática y digest FNV-1a en checkpoints
+  acotados;
+- devuelve back-pressure cuando hay más de dos períodos en cola, en lugar de
+  esperar que la cola llegue a cero después de cada bloque.
+
+También había un segundo desacuerdo: `bufferSizeInBytes=1048576` describe el
+ring productor del engine, pero se usaba como período físico. Para PCM16
+stereo eso solicitaba **262.144 frames**, casi seis segundos a 44.1 kHz. La
+salida ahora pide un período convencional de 1.024 frames.
+
+El tercer problema sólo se manifiesta correctamente en el hardware. El
+binario armeabi usa el antiguo modo short-vector de VFP: escribe FPSCR
+LEN=3/LEN=7 y ejecuta 40 operaciones F32 en 20 regiones del mixer. qemu-arm
+todavía implementa esa semántica. El Cortex-A35 ARMv8 de la R36S trata
+LEN/STRIDE como RAZ/WI y ejecutaría únicamente lane 0, dejando el resto del
+vector sin calcular.
+
+`src/vfp_vector_patch.cpp` contiene la lista exacta de 40 offsets y opcode
+esperado. Antes de tocar el binario valida cada palabra y sólo acepta VMOV,
+VADD, VSUB, VMUL y VMLA F32. Cada operación se reemplaza por un branch
+condicional a un trampoline A32 cercano que:
+
+1. preserva `r4`, `r5` y FPSCR;
+2. limpia LEN/STRIDE;
+3. emite cuatro u ocho operaciones escalares con wrap por banco VFP;
+4. restaura FPSCR y registros;
+5. vuelve a la instrucción siguiente.
+
+El decoder/generador se adaptó de Bythos14/VFPVector, commit `d95ba13`
+(`Fix mis-identification of VABS and VSQRT`), MIT. No se copió su manejador de
+excepciones de Vita: Linux/ARMv8 acepta silenciosamente estas instrucciones,
+por lo que este loader aplica una lista eager y específica para el SHA1 fijado.
+
+Prueba A/B local:
+
+- patch activo: `VFP short vectors: expanded 40/40 audio instructions`;
+- referencia qemu: `DEADSPACE_NO_VFP_PATCH=1`;
+- ambos abrieron dummy SDL exactamente a 44.100 Hz, 2 canales, S16 y período
+  1.024;
+- los digests coincidieron en todos los checkpoints fijos hasta 524.288
+  muestras; por ejemplo `write=512 digest=0feb61957bfd0383`.
+
+El menú local produjo silencio en esos checkpoints; los `.sps` de música no se
+abren hasta avanzar al juego. Hubo señal mínima después, pero no se usa como
+prueba audible. Lo demostrado localmente es que el device abre, la cola se
+consume a tiempo real y la expansión ARMv8 entrega exactamente el mismo PCM
+que los short vectors originales de qemu para la misma cantidad de muestras.
+La salida por el parlante ALSA real queda como prueba de hardware.
+
+Corrida final del árbitro inmutable con estos cambios:
+
+```text
+[verify] M2 ok (0 unresolved symbols)
+[verify] M3 ok
+[verify] M4 ok
+[verify] M5 ok (375 frames)
+[verify] M6 counters: assets=84 textures=168 draws=22009 nonblack=1
+[verify] M6 ok (assets=84 textures=168 draws=22009, survived)
+[verify] M7 autopilot: injected 7 keys over 375 frames, scene changed 2 time(s)
+[verify] M7 ok
+[verify] === milestone reached: 7 / 7 ===
+```

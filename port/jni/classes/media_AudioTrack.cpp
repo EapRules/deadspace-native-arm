@@ -1,3 +1,8 @@
+#include <algorithm>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string>
+#include <string.h>
 #include <vector>
 #include <SDL2/SDL.h>
 
@@ -27,19 +32,113 @@ static int GetSDLFormatBytes(int audioFormat)
     }
 }
 
+static SDL_AudioDeviceID OpenAudioOutput(const SDL_AudioSpec *desired,
+                                         SDL_AudioSpec *obtained)
+{
+    const char *forced = getenv("DEADSPACE_AUDIODEV");
+    if (forced && *forced) {
+        SDL_AudioDeviceID device =
+            SDL_OpenAudioDevice(forced, 0, desired, obtained, 0);
+        if (!device)
+            warning("AudioTrack: DEADSPACE_AUDIODEV=%s failed: %s\n",
+                    forced, SDL_GetError());
+        return device;
+    }
+
+    SDL_AudioDeviceID device =
+        SDL_OpenAudioDevice(NULL, 0, desired, obtained, 0);
+    if (device)
+        return device;
+
+    /*
+     * Some PortMaster frontends keep the speaker PCM busy briefly after
+     * launching a port, while an unused HDMI endpoint opens immediately.
+     * Prefer a non-HDMI enumerated device and wait out "busy" before accepting
+     * any remaining endpoint as a last resort.
+     */
+    const char *error = SDL_GetError();
+    std::string default_error = error ? error : "unknown error";
+    int count = SDL_GetNumAudioDevices(0);
+    for (int pass = 0; pass < 2 && !device; pass++) {
+        for (int i = 0; i < count && !device; i++) {
+            const char *name = SDL_GetAudioDeviceName(i, 0);
+            if (!name || !*name)
+                continue;
+            bool hdmi = strcasestr(name, "hdmi") != NULL;
+            if (pass == 0 && hdmi)
+                continue;
+
+            int attempts = pass == 0 ? 5 : 1;
+            for (int attempt = 0; attempt < attempts; attempt++) {
+                device = SDL_OpenAudioDevice(name, 0, desired, obtained, 0);
+                if (device)
+                    break;
+                const char *attempt_error = SDL_GetError();
+                if (!attempt_error || !strcasestr(attempt_error, "busy") ||
+                    attempt + 1 >= attempts)
+                    break;
+                SDL_Delay(400);
+            }
+            if (device)
+                trace("AudioTrack: default output failed (%s); opened \"%s\" "
+                      "on pass %d", default_error.c_str(), name, pass + 1);
+        }
+    }
+
+    if (!device)
+        warning("AudioTrack: no output accepted %d Hz/%u ch/0x%x: %s "
+                "(%d enumerated device(s))\n",
+                desired->freq, (unsigned int)desired->channels,
+                (unsigned int)desired->format, default_error.c_str(), count);
+    return device;
+}
+
 AudioTrack::AudioTrack(int streamType, int sampleRateInHz, int channelConfig, int audioFormat, int bufferSizeInBytes, int mode)
-{    
+{
     SDL_zero(desired);
+    SDL_zero(obtained);
     desired.freq = sampleRateInHz;
     desired.format = GetSDLFormat(audioFormat);
     desired.channels = (channelConfig == 4) ? 1 : 2;
-    desired.samples = bufferSizeInBytes / (desired.channels * GetSDLFormatBytes(audioFormat));
+    /*
+     * bufferSizeInBytes is the engine's 1 MiB producer ring, not the hardware
+     * period. Passing it through made SDL request a 262144-frame (six-second)
+     * device buffer. Queue-driven playback only needs a conventional period.
+     */
+    desired.samples = 1024;
     desired.callback = NULL;
     playing = 0;
-    
+    deviceId = 0;
     needed_bytes = bufferSizeInBytes;
-    deviceId = SDL_OpenAudioDevice(NULL, 0, &desired, &obtained, 0);
     this->mode = mode;
+
+    if (!(SDL_WasInit(SDL_INIT_AUDIO) & SDL_INIT_AUDIO) &&
+        SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+        warning("AudioTrack: SDL audio subsystem failed to initialize: %s\n",
+                SDL_GetError());
+        return;
+    }
+
+    const char *driver = SDL_GetCurrentAudioDriver();
+    int outputs = SDL_GetNumAudioDevices(0);
+    trace("AudioTrack: SDL audio ready driver=%s outputs=%d request=%d Hz/%u "
+          "ch/0x%x period=%u",
+          driver ? driver : "(none)", outputs, desired.freq,
+          (unsigned int)desired.channels, (unsigned int)desired.format,
+          (unsigned int)desired.samples);
+    for (int i = 0; i < outputs && i < 8; i++) {
+        const char *name = SDL_GetAudioDeviceName(i, 0);
+        trace("AudioTrack: output[%d]=%s", i, name ? name : "(null)");
+    }
+
+    deviceId = OpenAudioOutput(&desired, &obtained);
+    if (deviceId) {
+        trace("AudioTrack: opened device=%u obtained=%d Hz/%u ch/0x%x "
+              "period=%u",
+              (unsigned int)deviceId, obtained.freq,
+              (unsigned int)obtained.channels, (unsigned int)obtained.format,
+              (unsigned int)obtained.samples);
+    }
 }
 
 static void AudioClass_ctor1(JNIEnv *env, jobject obj, jclass clazz, int streamType, int sampleRateInHz, int channelConfig, int audioFormat, int bufferSizeInBytes, int mode)
@@ -121,6 +220,66 @@ int AudioTrack::write(JNIEnv *env, jobject obj, jclass clazz, jbyteArray audioDa
  * signature against the byte[] implementation would have queued half the audio
  * and produced a stutter that sounds like a performance problem.
  */
+/*
+ * Per-write signal metrics plus a running digest of every sample the mixer has
+ * produced.
+ *
+ * The digest is what makes the VFP short-vector expansion testable. qemu-arm
+ * still implements FPSCR LEN/STRIDE, so the same mixer can be run twice - once
+ * with the trampolines installed and once with DEADSPACE_NO_VFP_PATCH=1 - and
+ * the two digests must agree exactly. That turns "the scalar expansion is
+ * arithmetically equivalent" from a claim about hand-decoded opcodes into a
+ * comparison the harness can make, on a machine that has no ARMv8 handheld
+ * attached.
+ *
+ * Reported at a fixed set of write indices rather than a time interval,
+ * because the comparison only means something if both runs report after the
+ * same number of samples.
+ */
+static void report_pcm(const int16_t *samples, int count)
+{
+    static unsigned int write_index  = 0;
+    static uint64_t     digest       = 1469598103934665603ULL;  /* FNV-1a */
+    static uint64_t     total_frames = 0;
+    static bool         saw_signal   = false;
+
+    unsigned int nonzero = 0;
+    unsigned int peak = 0;
+    uint64_t square_sum = 0;
+
+    for (int i = 0; i < count; i++) {
+        int sample = samples[i];
+        unsigned int magnitude =
+            sample < 0 ? (unsigned int)(-(int64_t)sample)
+                       : (unsigned int)sample;
+        if (magnitude)
+            nonzero++;
+        peak = std::max(peak, magnitude);
+        square_sum += (uint64_t)magnitude * magnitude;
+
+        digest = (digest ^ (uint16_t)sample) * 1099511628211ULL;
+    }
+
+    write_index++;
+    total_frames += (uint64_t)count;
+
+    bool first_signal = nonzero && !saw_signal;
+    saw_signal = saw_signal || nonzero;
+
+    /* Powers of two keep the log bounded over a long run while still giving
+     * several comparison points early, where a divergence would appear. */
+    bool milestone = (write_index & (write_index - 1)) == 0;
+    if (write_index <= 4 || first_signal || milestone) {
+        trace("AudioTrack: PCM write=%u samples=%d nonzero=%u peak=%u "
+              "mean_square=%llu total=%llu digest=%016llx",
+              write_index, count, nonzero, peak,
+              (unsigned long long)(count ?
+                  square_sum / (unsigned int)count : 0),
+              (unsigned long long)total_frames,
+              (unsigned long long)digest);
+    }
+}
+
 int AudioTrack::write_shorts(JNIEnv *env, jobject obj,
                              jshortArray audioData, int offsetInShorts,
                              int sizeInShorts)
@@ -154,20 +313,64 @@ int AudioTrack::write_shorts(JNIEnv *env, jobject obj,
         return 0;
     }
 
+    if (offsetInShorts < 0 || sizeInShorts < 0 ||
+        (size_t)offsetInShorts + (size_t)sizeInShorts >
+            (size_t)data->count) {
+        warning("AudioTrack.write(short[]): range offset=%d count=%d exceeds "
+                "array length=%d - dropping write\n",
+                offsetInShorts, sizeInShorts, (int)data->count);
+        return 0;
+    }
+
     uintptr_t where = (uintptr_t)data->elements + (size_t)offsetInShorts * 2;
     int       bytes = sizeInShorts * 2;
 
+    /*
+     * Measure the PCM *before* the output device is consulted, and deliberately
+     * so.
+     *
+     * The build container has no ALSA endpoint at all, so on the verification
+     * path deviceId is always zero. Reporting after an early return meant the
+     * one run that executes on every commit produced no signal telemetry
+     * whatsoever - and signal telemetry is the only evidence available for the
+     * VFP short-vector expansion, which cannot be exercised any other way
+     * without the physical console.
+     *
+     * Silence and "no endpoint" are different failures and the log has to keep
+     * them apart. No samples or proprietary assets leave the process.
+     */
+    report_pcm((const int16_t *)where, sizeInShorts);
+
+    if (!track->deviceId) {
+        static bool warned_no_device = false;
+        if (!warned_no_device) {
+            warned_no_device = true;
+            warning("AudioTrack.write(short[]): no SDL output device; PCM "
+                    "cannot be played\n");
+        }
+        return 0;
+    }
+
     int ret = SDL_QueueAudio(track->deviceId, (void *)where, bytes);
+    if (ret != 0)
+        warning("AudioTrack.write(short[]): SDL_QueueAudio failed: %s\n",
+                SDL_GetError());
 
     if (track->playing == 0)
         AudioTrack::play(env, obj, (jclass)&AudioTrack::clazz);
 
-    /* Blocking, like the byte[] path: the engine's mixer thread expects write()
-     * to be back-pressure, and returning immediately makes it produce as fast
-     * as it can into a queue that only grows. */
-    do {
-        SDL_Delay(0);
-    } while (SDL_GetQueuedAudioSize(track->deviceId));
+    /*
+     * Android's blocking write waits for buffer space, not for the speaker to
+     * drain completely. Keep two SDL periods queued: waiting for zero between
+     * every 512-frame game block created an audible scheduling gap.
+     */
+    unsigned int bytes_per_frame =
+        (SDL_AUDIO_BITSIZE(track->obtained.format) / 8) *
+        track->obtained.channels;
+    unsigned int queue_high_water =
+        track->obtained.samples * bytes_per_frame * 2;
+    while (SDL_GetQueuedAudioSize(track->deviceId) > queue_high_water)
+        SDL_Delay(1);
 
     return ret == 0 ? sizeInShorts : 0;
 }

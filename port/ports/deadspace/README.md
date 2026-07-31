@@ -19,8 +19,11 @@ The immutable headless verifier reaches **M7/7**:
 Real R36S testing confirms centred 640x480 output, a working menu cursor and
 working pad input. The white 3D scene was traced to PVRTC textures unsupported
 by Mali-G31. This build decodes them to RGBA8888 in software; the corrected
-3D scene is now confirmed on the real R36S. Audio, save data and a complete
-play-through still require testing.
+3D scene is now confirmed on the real R36S. This candidate also replaces the
+cross cursor with an arrow, restores it with L3/R3 or Start, sustains camera
+movement while the right stick is held and repairs the previously unopened
+SDL audio path. Audio, these new input changes, save data and a complete
+play-through still require testing on the device.
 
 ## Your game files
 
@@ -80,6 +83,10 @@ Every launch replaces `ports/deadspace/log.txt`. Useful lines include:
 
 - `TRACE: module loaded`
 - `TRACE: mounted extracted content at /published`
+- `TRACE: VFP short vectors: expanded 40/40 audio instructions`
+- `TRACE: AudioTrack: SDL audio ready driver=...`
+- `TRACE: AudioTrack: opened device=...`
+- `TRACE: AudioTrack: PCM write=...`
 - `TRACE: framebuffer non-black`
 - `FATAL:` followed by registers and module-relative addresses
 

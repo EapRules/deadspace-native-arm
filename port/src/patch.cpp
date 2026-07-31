@@ -91,6 +91,7 @@
 #include "platform.h"
 #include "so_util.h"
 #include "trace.h"
+#include "vfp_vector_patch.h"
 #include "patch.h"
 
 extern uintptr_t so_alloc_arena(so_module *so, uintptr_t range,
@@ -268,6 +269,7 @@ void so_patch_binary(so_module *mod)
     }
 
     patch_mount_call(mod);
+    patch_vfp_short_vectors(mod);
 
     /*
      * The module is mapped PROT_READ|PROT_WRITE|PROT_EXEC at this point and
