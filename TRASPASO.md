@@ -750,6 +750,55 @@ También se actualizó el README instalado, se eliminó únicamente el archivo d
 metadatos AppleDouble `._deadspace` creado por macOS y el volumen
 `/Volumes/ROMS` fue expulsado correctamente con `diskutil eject`.
 
-Estado: render correcto confirmado en la reproducción local y M7/7; falta que
-el usuario confirme esta build sobre la Mali-G31 real. Audio continúa
-deliberadamente postergado.
+Estado al cerrar esa etapa: render correcto en la reproducción local y M7/7;
+la confirmación posterior sobre la Mali-G31 real queda registrada abajo. Audio
+continuaba deliberadamente postergado.
+
+### 11.14 Confirmación PVRTC en hardware y corrección de los controles
+
+El usuario probó en la R36S real la build cuyo binario tenía SHA-256
+`9199544a9db9113e20facac61fb518dfc892beff35f17156ff3e313924a015da`.
+Confirmó que el mundo 3D ahora se ve correctamente: personajes, objetos,
+fondos, luces y texturas dejaron de aparecer blancos. Esto cierra la hipótesis
+PVRTC también sobre la Mali-G31 real; no era una particularidad de llvmpipe.
+
+La misma prueba dejó tres observaciones más acotadas:
+
+1. el cursor funcional seguía siendo la cruz provisoria;
+2. mover un stick ocultaba el cursor y en ese dispositivo no había una forma
+   evidente de recuperarlo;
+3. el stick izquierdo producía movimiento continuo, pero el derecho sólo
+   giraba una etapa por cada nueva deflexión: mantenerlo a un lado no sostenía
+   el giro;
+4. todavía no había audio.
+
+La causa del punto 3 estaba en `android/input_bridge.cpp`. `update_sticks()` se
+ejecutaba únicamente al recibir `SDL_CONTROLLERAXISMOTION`. SDL emite ese
+evento cuando cambia el valor del eje, no durante cada frame que permanece
+mantenido. Además, el código trataba el touchpad derecho como un único arrastre
+largo. El port de Vita de referencia hace otra cosa: en cada poll termina el
+gesto derecho anterior y emite un nuevo `DOWN` en el origen más un `MOVE` a la
+posición del stick. El juego consume cada uno como un desplazamiento de cámara
+finito.
+
+La corrección de ChatGPT/Codex:
+
+- llama `update_sticks()` una vez por frame desde `android_input_tick()`;
+- conserva el stick izquierdo como un toque sostenido con `MOVE` por frame;
+- traduce el derecho a `UP → DOWN → MOVE` por frame, igual que Vita;
+- registra al terminar cuántos pulsos de frame produjo el gesto para que una
+  prueba pueda distinguir continuidad real de un único evento;
+- reemplaza la cruz por una flecha pixel-art negra/celeste dibujada con el
+  mismo backend GLES1/scissor y restauración completa de estado;
+- permite mostrar/ocultar la flecha con L3 o R3;
+- si el cursor estaba oculto, Start lo restaura al centro y a la vez conserva
+  el key event Start que abre el menú;
+- agrega `stick left|right X Y` al canal del emulador y `set_stick` al MCP para
+  poder mantener un eje estable sin joystick físico.
+
+La validación local capturó el framebuffer tanto con el cursor oculto por un
+stick como restaurado por Start. La captura restaurada muestra la flecha sobre
+el menú 3D ya texturado. En una segunda ejecución, mantener el stick derecho
+durante dos segundos produjo **77 pulsos consecutivos de frame** antes del
+release; ya no depende de nuevos eventos de eje. Esta candidata todavía
+requiere la prueba de controles en la R36S.

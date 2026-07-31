@@ -19,8 +19,8 @@ The immutable headless verifier reaches **M7/7**:
 Real R36S testing confirms centred 640x480 output, a working menu cursor and
 working pad input. The white 3D scene was traced to PVRTC textures unsupported
 by Mali-G31. This build decodes them to RGBA8888 in software; the corrected
-menu is verified locally and this candidate awaits confirmation on the R36S.
-Audio, save data and a complete play-through still require testing.
+3D scene is now confirmed on the real R36S. Audio, save data and a complete
+play-through still require testing.
 
 ## Your game files
 
@@ -60,14 +60,16 @@ Vita port:
 | L1 / R1 | Shoulder buttons |
 | Start | Start |
 | Select | Select |
-| L3 | Show/hide menu cursor |
+| L3 / R3 | Show/hide menu cursor |
 | Left stick | Virtual touchscreen movement stick |
 | Right stick | Virtual touchpad aiming stick |
 
 Dead Space's menus are touch-only even in the working Vita port. The cursor
 starts at the centre of the title screen. Move it with the D-pad and press A
-to tap. Moving either analog stick hides it for gameplay; press L3 to bring it
-back when a menu needs touch input.
+to tap. Moving either analog stick hides it for gameplay; press L3 or R3 to
+bring it back. Start also restores it while opening the pause menu. The right
+stick is translated into a fresh touchpad camera gesture every frame so a held
+direction keeps turning continuously.
 
 `deadspace.gptk` intentionally leaves game buttons unbound. It runs only so
 PortMaster's standard exit combination can terminate the process.

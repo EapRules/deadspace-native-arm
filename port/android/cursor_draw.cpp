@@ -2,7 +2,7 @@
  * Software cursor for Dead Space's touch-only menus.
  *
  * The game imports GLES 1.1 and the real R36S driver does not expose a desktop
- * hardware cursor under KMS/DRM. A small cross is therefore painted into the
+ * hardware cursor under KMS/DRM. A compact arrow is therefore painted into the
  * default framebuffer just before swap. glClear plus scissor is used instead
  * of shaders or vertex arrays: it works on pure GLES 1.1 and touches very
  * little state. Every changed value is restored before the next game frame.
@@ -93,6 +93,27 @@ static void clear_rect(CursorGl &gl, int x, int y, int width, int height,
     gl.clear(GL_COLOR_BUFFER_BIT);
 }
 
+static void draw_pattern_runs(CursorGl &gl, const char *const *pattern,
+                              int rows, char pixel, int x, int y,
+                              int fb_width, int fb_height)
+{
+    for (int row = 0; row < rows; row++) {
+        const char *line = pattern[row];
+        for (int begin = 0; line[begin];) {
+            while (line[begin] && line[begin] != pixel)
+                begin++;
+            if (!line[begin])
+                break;
+            int end = begin + 1;
+            while (line[end] == pixel)
+                end++;
+            clear_rect(gl, x + begin, y - row, end - begin, 1,
+                       fb_width, fb_height);
+            begin = end;
+        }
+    }
+}
+
 extern "C" void android_cursor_draw(int fb_width, int fb_height)
 {
     float cx = 0.0f, cy = 0.0f;
@@ -123,13 +144,38 @@ extern "C" void android_cursor_draw(int fb_width, int fb_height)
     int x = (int)cx;
     int y = fb_height - 1 - (int)cy;
 
-    /* Black outline, then a white one-pixel centre: visible on any artwork. */
+    /*
+     * Pixel-art pointer with the hot spot at its upper-left tip. It remains
+     * legible over both the bright menus and the dark game without relying on
+     * blending, textures or any GLES feature beyond the existing scissor path.
+     */
+    static const char *const pointer[] = {
+        "#..............",
+        "##.............",
+        "#o#............",
+        "#oo#...........",
+        "#ooo#..........",
+        "#oooo#.........",
+        "#ooooo#........",
+        "#oooooo#.......",
+        "#ooooooo#......",
+        "#oooooooo#.....",
+        "#ooooo#####....",
+        "#oo#oo#........",
+        "#o#.#oo#.......",
+        "##..#oo#.......",
+        "#....#oo#......",
+        ".....#oo#......",
+        "......##.......",
+    };
+    const int pointer_rows = sizeof(pointer) / sizeof(pointer[0]);
+
     gl.clear_color(0.0f, 0.0f, 0.0f, 1.0f);
-    clear_rect(gl, x - 10, y - 2, 21, 5, fb_width, fb_height);
-    clear_rect(gl, x - 2, y - 10, 5, 21, fb_width, fb_height);
-    gl.clear_color(1.0f, 1.0f, 1.0f, 1.0f);
-    clear_rect(gl, x - 8, y, 17, 1, fb_width, fb_height);
-    clear_rect(gl, x, y - 8, 1, 17, fb_width, fb_height);
+    draw_pattern_runs(gl, pointer, pointer_rows, '#', x, y,
+                      fb_width, fb_height);
+    gl.clear_color(0.82f, 0.96f, 1.0f, 1.0f);
+    draw_pattern_runs(gl, pointer, pointer_rows, 'o', x, y,
+                      fb_width, fb_height);
 
     gl.clear_color(previous_clear[0], previous_clear[1],
                    previous_clear[2], previous_clear[3]);

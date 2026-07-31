@@ -17,6 +17,7 @@ extern "C" void android_input_cursor_position(float *x, float *y, int *visible);
 void android_input_cursor_set(float x, float y);
 void android_input_cursor_press(bool down);
 bool android_input_inject_control(const char *name, bool down);
+bool android_input_inject_stick(const char *name, float x, float y);
 void android_input_autopilot_tick(long frame);
 void android_input_autopilot_sample(long frame);
 long android_input_autopilot_keys(void);

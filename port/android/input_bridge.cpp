@@ -76,6 +76,8 @@ static SDL_GameController *g_controllers[4] = {};
 static bool g_left_active = false;
 static bool g_right_active = false;
 static int16_t g_lx = 0, g_ly = 0, g_rx = 0, g_ry = 0;
+static float g_right_last_x = 0.0f, g_right_last_y = 0.0f;
+static unsigned int g_right_pulses = 0;
 static Uint8 g_accept_button = SDL_CONTROLLER_BUTTON_B;
 static Uint8 g_back_button = SDL_CONTROLLER_BUTTON_A;
 
@@ -101,6 +103,8 @@ static long g_auto_scenes = 0;
 static long g_pending_key_frame = -1;
 static int  g_pending_key_serial = 0;
 static int  g_counted_key_serial = 0;
+
+static void update_sticks(void);
 
 static const int kAutopilotKeys[] = {
     AKEYCODE_DPAD_CENTER,
@@ -198,6 +202,13 @@ static void cursor_tap(bool down)
 
 void android_input_tick(void)
 {
+    /*
+     * SDL axis events report value changes, not elapsed held time. The game
+     * consumes both virtual sticks once per Android poll, so refresh them once
+     * per rendered frame even when the physical axis value is unchanged.
+     */
+    update_sticks();
+
     Uint32 now = SDL_GetTicks();
     if (!g_cursor_last_ms)
         g_cursor_last_ms = now;
@@ -267,6 +278,25 @@ bool android_input_inject_control(const char *name, bool down)
     return android_input_event(&event);
 }
 
+bool android_input_inject_stick(const char *name, float x, float y)
+{
+    if (!name || (strcasecmp(name, "left") && strcasecmp(name, "right")))
+        return false;
+
+    x = std::max(-1.0f, std::min(x, 1.0f));
+    y = std::max(-1.0f, std::min(y, 1.0f));
+    int16_t raw_x = (int16_t)lrintf(x * 32767.0f);
+    int16_t raw_y = (int16_t)lrintf(y * 32767.0f);
+    if (!strcasecmp(name, "left")) {
+        g_lx = raw_x;
+        g_ly = raw_y;
+    } else {
+        g_rx = raw_x;
+        g_ry = raw_y;
+    }
+    return true;
+}
+
 static void update_sticks(void)
 {
     if (!g_pointer)
@@ -303,15 +333,34 @@ static void update_sticks(void)
                      left_x, left_y);
     g_left_active = left_now;
 
-    if (right_now && !g_right_active)
+    /*
+     * The original Vita bridge ends and restarts the right-stick swipe on
+     * every poll. Dead Space treats one long touchpad drag as a finite camera
+     * gesture; repeatedly pulsing UP/DOWN/MOVE makes a held stick rotate
+     * continuously. Keep the left movement stick as one sustained drag.
+     */
+    if (g_right_active)
+        send_pointer(ID_RAW_POINTER_UP, MODULE_TOUCH_PAD, 2,
+                     g_right_last_x, g_right_last_y);
+    if (right_now) {
+        if (!g_right_active) {
+            g_right_pulses = 0;
+            trace("input: right-stick camera gesture started");
+        }
         send_pointer(ID_RAW_POINTER_DOWN, MODULE_TOUCH_PAD, 2,
                      right_base_x, right_base_y);
-    if (right_now)
         send_pointer(ID_RAW_POINTER_MOVE, MODULE_TOUCH_PAD, 2,
                      right_x, right_y);
-    else if (g_right_active)
-        send_pointer(ID_RAW_POINTER_UP, MODULE_TOUCH_PAD, 2,
-                     right_x, right_y);
+        g_right_last_x = right_x;
+        g_right_last_y = right_y;
+        g_right_pulses++;
+        if (g_right_pulses == 30)
+            trace("input: right-stick camera gesture remains continuous "
+                  "(30 frame pulses)");
+    } else if (g_right_active) {
+        trace("input: right-stick camera gesture ended after %u frame pulses",
+              g_right_pulses);
+    }
     g_right_active = right_now;
 }
 
@@ -378,7 +427,8 @@ void android_input_init(so_module *mod, JNIEnv *env, int width, int height)
           g_autopilot ? " autopilot=on" : "");
 
     cursor_show();
-    trace("input: menus use d-pad cursor + physical A tap; L3 toggles cursor");
+    trace("input: menus use d-pad cursor + physical A tap; L3/R3 toggle cursor; "
+          "Start restores it");
 }
 
 bool android_input_event(const SDL_Event *event)
@@ -408,7 +458,8 @@ bool android_input_event(const SDL_Event *event)
         bool down = event->type == SDL_CONTROLLERBUTTONDOWN;
         Uint8 button = event->cbutton.button;
 
-        if (button == SDL_CONTROLLER_BUTTON_LEFTSTICK) {
+        if (button == SDL_CONTROLLER_BUTTON_LEFTSTICK ||
+            button == SDL_CONTROLLER_BUTTON_RIGHTSTICK) {
             if (down) {
                 if (g_cursor_visible)
                     cursor_hide();
@@ -419,6 +470,15 @@ bool android_input_event(const SDL_Event *event)
                   (unsigned int)button, down ? "down" : "up");
             break;
         }
+
+        /*
+         * Analog movement deliberately hides the menu cursor for gameplay.
+         * Opening the pause menu is the reliable recovery path even on devices
+         * whose stick-click buttons are not exposed by their SDL mapping.
+         */
+        if (button == SDL_CONTROLLER_BUTTON_START && down &&
+            !g_cursor_visible)
+            cursor_show();
 
         if (g_cursor_visible) {
             switch (button) {
@@ -473,7 +533,6 @@ bool android_input_event(const SDL_Event *event)
         case SDL_CONTROLLER_AXIS_RIGHTY: g_ry = event->caxis.value; break;
         default: return true;
         }
-        update_sticks();
         break;
         }
     case SDL_KEYDOWN:

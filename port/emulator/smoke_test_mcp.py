@@ -47,6 +47,23 @@ def main() -> int:
         )
         assert not started.get("isError"), started
 
+        held = call(
+            "tools/call",
+            {
+                "name": "set_stick",
+                "arguments": {"stick": "right", "x": 1.0, "y": 0.0},
+            },
+        )
+        assert not held.get("isError"), held
+        released = call(
+            "tools/call",
+            {
+                "name": "set_stick",
+                "arguments": {"stick": "right", "x": 0.0, "y": 0.0},
+            },
+        )
+        assert not released.get("isError"), released
+
         capture = call(
             "tools/call", {"name": "capture_screen", "arguments": {}}
         )
@@ -59,7 +76,7 @@ def main() -> int:
             "tools/call", {"name": "stop_emulator", "arguments": {}}
         )
         assert not stopped.get("isError"), stopped
-        print("MCP smoke test PASS: initialize, start, PNG capture, stop")
+        print("MCP smoke test PASS: initialize, start, stick, PNG capture, stop")
         return 0
     finally:
         if server.poll() is None:

@@ -30,9 +30,9 @@ non-black framebuffer
 ```
 
 That proves startup, content loading, rendering and input-driven progression in
-the harness. The corrected graphics candidate is on the R36S SD and awaits
-device confirmation. Audio, saves and a complete play-through still require
-device testing.
+the harness. The PVRTC fallback is also confirmed on the real R36S Mali-G31:
+the previously white characters, objects and backgrounds now render correctly.
+Audio, saves and a complete play-through still require device testing.
 
 The full investigation history and explicit split between Claude's work and
 ChatGPT/Codex's M4→M7 work is in [`../TRASPASO.md`](../TRASPASO.md).
@@ -108,7 +108,8 @@ This binary has no `AInputQueue` imports. Input is delivered through its
 exported JNI entry points, matching the working Vita port:
 
 - title/menus: D-pad moves a visible software cursor, A taps it
-- L3 toggles the menu cursor after it has been dismissed
+- L3 or R3 toggles the menu cursor after it has been dismissed
+- Start restores the cursor while opening the pause menu
 - buttons outside cursor mode → `KeyboardAndroid.NativeOnKeyDown/Up`
 - left stick → virtual touchscreen movement stick
 - right stick → virtual touchpad aiming stick
@@ -123,7 +124,7 @@ is hardfp.
 
 ## Graphics and real-device status
 
-The `d4ca229` build was tested on an R36S with its Mali-G31 driver:
+The first `d4ca229` build was tested on an R36S with its Mali-G31 driver:
 
 - the image is correctly centred at 640x480;
 - the D-pad cursor and physical controls work and can advance through menus;
@@ -138,12 +139,20 @@ diagnostics identified rejected `glCompressedTexImage2D` uploads:
 and Mali-G31. The loader now uses Imagination's MIT-licensed decoder and
 uploads RGBA8888 when the driver does not advertise native PVRTC.
 
-A subsequent local capture renders the complete menu environment with its
-textures, lighting and materials, and the immutable harness remains M7/7. The
+A subsequent local capture rendered the complete menu environment with its
+textures, lighting and materials, and the immutable harness remained M7/7. The
 candidate with SHA-256
 `9199544a9db9113e20facac61fb518dfc892beff35f17156ff3e313924a015da`
-is installed on the SD for hardware confirmation. Audio remains intentionally
-deferred.
+was then tested on the real R36S and the user confirmed that the full 3D scene
+also renders correctly there.
+
+That hardware pass exposed two isolated input issues in the otherwise working
+controls: the provisional cross cursor could not be recovered after analog
+input, and a held right stick produced only one finite camera gesture. The next
+candidate replaces the cross with a high-contrast arrow, restores it with
+L3/R3 or Start, refreshes sticks every frame and reproduces the Vita port's
+per-frame right-touchpad gesture. These changes are locally verified and await
+the next R36S test. Audio remains the outstanding subsystem.
 
 ## Interactive local emulator
 

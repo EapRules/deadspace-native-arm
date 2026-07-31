@@ -25,6 +25,8 @@ Manual examples:
 ./emulator/send.sh click up
 ./emulator/send.sh button start down
 ./emulator/send.sh button start up
+./emulator/send.sh stick right 1 0
+./emulator/send.sh stick right 0 0
 ./emulator/send.sh screenshot menu
 ./emulator/send.sh quit
 ```
@@ -54,7 +56,7 @@ the rejected PVRTC uploads that caused the white 3D scene.
 
 - `start_emulator` / `stop_emulator`
 - `emulator_status`
-- `move_cursor` / `click` / `press_control`
+- `move_cursor` / `click` / `press_control` / `set_stick`
 - `capture_screen`
 - `read_emulator_log`
 

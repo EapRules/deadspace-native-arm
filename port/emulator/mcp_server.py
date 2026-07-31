@@ -174,6 +174,18 @@ def press_control(arguments: dict[str, Any]) -> dict[str, Any]:
     return _text(f"{control} queued (down/up on separate game frames).")
 
 
+def set_stick(arguments: dict[str, Any]) -> dict[str, Any]:
+    stick = str(arguments["stick"]).lower()
+    if stick not in {"left", "right"}:
+        raise ValueError(f"unknown stick {stick!r}")
+    x = float(arguments["x"])
+    y = float(arguments["y"])
+    if not -1.0 <= x <= 1.0 or not -1.0 <= y <= 1.0:
+        raise ValueError("stick axes must be inside -1.0..1.0")
+    _append(f"stick {stick} {x:.5f} {y:.5f}")
+    return _text(f"{stick} stick held at ({x:.3f}, {y:.3f}); send 0,0 to release.")
+
+
 def capture_screen(arguments: dict[str, Any]) -> dict[str, Any]:
     token = f"mcp-{int(time.time())}-{uuid.uuid4().hex[:8]}"
     path = RUNTIME_DIR / "screenshots" / f"{token}.png"
@@ -266,6 +278,20 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "set_stick",
+        "description": "Set and hold a virtual R36S analog stick; send x=0,y=0 to release it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "stick": {"type": "string", "enum": ["left", "right"]},
+                "x": {"type": "number", "minimum": -1.0, "maximum": 1.0},
+                "y": {"type": "number", "minimum": -1.0, "maximum": 1.0},
+            },
+            "required": ["stick", "x", "y"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "capture_screen",
         "description": "Capture the emulator's current default framebuffer and return a real 640x480 PNG image.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -290,6 +316,7 @@ HANDLERS = {
     "move_cursor": move_cursor,
     "click": click,
     "press_control": press_control,
+    "set_stick": set_stick,
     "capture_screen": capture_screen,
     "read_emulator_log": read_log,
 }

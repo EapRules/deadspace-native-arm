@@ -9,6 +9,7 @@
  *   cursor X Y
  *   click down|up
  *   button NAME down|up
+ *   stick left|right X Y
  *   screenshot TOKEN
  *   quit
  *
@@ -141,6 +142,16 @@ bool emulator_control_tick(long frame)
             bool down = !strcmp(state, "down");
             if (!android_input_inject_control(name, down))
                 trace("emulator: unknown control '%s'", name);
+        }
+    } else if (!strcmp(action, "stick")) {
+        char name[16] = {};
+        float x = 0.0f, y = 0.0f;
+        if (sscanf(line, "%*s %15s %f %f", name, &x, &y) == 3) {
+            if (android_input_inject_stick(name, x, y))
+                trace("emulator: stick %s %.3f %.3f",
+                      name, (double)x, (double)y);
+            else
+                trace("emulator: unknown stick '%s'", name);
         }
     } else if (!strcmp(action, "screenshot")) {
         char token[96] = {};
