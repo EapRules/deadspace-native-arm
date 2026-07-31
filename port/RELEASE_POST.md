@@ -62,8 +62,11 @@ tools/PortMaster/autoinstall/deadspace-portmaster.zip  # our free port
 ports/deadspace/deadspace.zip                          # your game donor
 ```
 
-Same card, same trip. Put it back in the console, open PortMaster and let it
-install, then **REBOOT**. Dead Space appears in Ports after the reboot.
+Same card, same trip. Put it back in the console, open PortMaster and wait for
+the exact **Finished running autoinstall** dialog. Acknowledge it, let
+PortMaster close normally, then **REBOOT THROUGH THE FIRMWARE MENU**. Do not
+hard-power the console during installation. Dead Space appears in Ports after
+the reboot.
 
 The first launch extracts and validates about 243-303 MiB of game data,
 depending on the donor. Keep at least 500 MiB free and do not power off during
@@ -73,6 +76,8 @@ that first extraction. Later launches start normally.
 
 - Autoinstall does not refresh EmulationStation's list, so the game will not
   appear until you reboot.
+- Keep the release filename exactly `deadspace-portmaster.zip`, and wait for
+  the final autoinstall dialog before rebooting.
 - Do not use Reinstall or Uninstall in Manage Ports. This independent release
   is not in PortMaster's catalogue, so those buttons try to download a source
   that is not there and may delete the user's donor/extracted data. Update by

@@ -93,7 +93,7 @@ docker run --rm -v "$PWD":/src -w /src deadspace-build make libs
 ./package_portmaster.sh
 ```
 
-The zip is written to `build/deadspace.zip`. It intentionally
+The zip is written to `build/deadspace-portmaster.zip`. It intentionally
 contains neither `libEAMGameDeadSpace.so` nor `assets/published`.
 
 ## PortMaster install
@@ -101,11 +101,14 @@ contains neither `libEAMGameDeadSpace.so` nor `assets/published`.
 Use the same independent-autoinstall workflow as the Ice Rage and Minigore 2
 releases:
 
-1. put our `deadspace-portmaster.zip` in PortMaster's `autoinstall/` directory;
+1. put our `deadspace-portmaster.zip` in PortMaster's `autoinstall/` directory
+   without renaming it;
 2. put the user's Xperia Play v1.1.33 APK/ZIP in `ports/deadspace/` (or an
    extracted donor under `ports/deadspace/gamedata/`);
-3. open PortMaster and let autoinstall finish;
-4. reboot, then launch Dead Space from Ports.
+3. open PortMaster and wait for the exact **Finished running autoinstall**
+   dialog; acknowledge it and let PortMaster return or close normally;
+4. reboot through the firmware menu, then launch Dead Space from Ports. Do not
+   hard-power the console while PortMaster is still installing.
 
 The first launch extracts and validates the donor automatically. Complete
 CFW-specific paths, the two autoinstall gotchas and accepted donor layouts are

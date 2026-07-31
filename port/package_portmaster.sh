@@ -6,7 +6,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-OUT="build/deadspace.zip"
+OUT="build/deadspace-portmaster.zip"
 STAGE="build/pkg-portmaster"
 
 [ -x build/deadspace ] \
@@ -51,6 +51,23 @@ chmod +x "$STAGE/Dead Space.sh" "$STAGE/deadspace/deadspace" \
 
 find "$STAGE" \( -name '._*' -o -name '.DS_Store' \) -delete
 (cd "$STAGE" && zip -qr "../../$OUT" .)
+
+# PortMaster rewrites an unsigned root launcher in place to add this line. Its
+# implementation opens the file with mode "w" before writing, so an interrupted
+# install can leave a zero-byte launcher on exFAT. Ship the canonical signature
+# ourselves: with the release filename below, PortMaster recognizes it and does
+# not touch the launcher after extraction.
+EXPECTED_SIGNATURE="# PORTMASTER: deadspace-portmaster.zip, Dead Space.sh"
+ACTUAL_SIGNATURE="$(unzip -p "$OUT" "Dead Space.sh" | sed -n '2p')"
+[ "$ACTUAL_SIGNATURE" = "$EXPECTED_SIGNATURE" ] || {
+    echo "package has wrong PortMaster signature: $ACTUAL_SIGNATURE" >&2
+    exit 1
+}
+[ "$(unzip -p "$OUT" "Dead Space.sh" | wc -c | tr -d ' ')" -gt 0 ] || {
+    echo "package has an empty launcher" >&2
+    exit 1
+}
+unzip -tq "$OUT" >/dev/null
 
 listing="$(unzip -Z1 "$OUT")"
 for required in "Dead Space.sh" "deadspace/deadspace" \

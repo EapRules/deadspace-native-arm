@@ -1018,7 +1018,7 @@ receta o el runtime, muestra un error en la TTY; un fallo del donor deja el
 detalle en `eapx.log`. Tras una importación exitosa conserva el chequeo SHA1
 del launcher antes de aplicar cualquier parche por offset.
 
-`package_portmaster.sh` ahora genera `build/deadspace.zip`, incluye eapx,
+`package_portmaster.sh` generaba `build/deadspace.zip`, incluía eapx,
 receta, placeholder, cover 4:3 aportada por el usuario, captura real 640x480 y
 las licencias del port/gmloader/PowerVR/VFPVector. `collect_libs.sh` resuelve el
 paquete Debian dueño de cada una de las diez `.so` transportadas y copia su
@@ -1282,8 +1282,52 @@ esta ejecución. Tampoco hay evidencia suficiente para afirmar que PortMaster
 destruyó el gamelist: eso queda como hipótesis abierta hasta reconstruir la
 secuencia de escrituras.
 
-Estado al pausar para documentar: no se modificó todavía la SD. Próximos pasos:
-reproducir la extracción y la firma que PortMaster aplica al launcher, corregir
-el paquete, agregar una prueba que rechace un `.sh` vacío, reconstruir el
-gamelist desde la copia de 19 entradas preservando historial y comprobar un
-autoinstall limpio antes de volver a expulsar la tarjeta.
+Ese fue el estado documentado en el commit `63262c9`, antes de modificar la SD.
+
+La inspección del PortMaster instalado mostró el punto vulnerable. Después de
+extraer un launcher sin firma, `add_pm_signature()` lee el archivo y luego lo
+abre con modo `w` para insertar `# PORTMASTER: ...`; la apertura trunca antes de
+escribir y no usa archivo temporal, `fsync` ni rename atómico. El escritor de
+`gamelist.xml` presenta el mismo riesgo general. Esto explica mecánicamente cómo
+un corte/interrupción puede producir los ceros observados, aunque los logs que
+quedaron no alcanzan para demostrar el instante exacto del corte de esta prueba.
+
+La mitigación del port evita esa reescritura: launcher, `port.json`, nombre de
+release y archivo generado usan ahora exactamente
+`deadspace-portmaster.zip`. El launcher ya incluye:
+
+```text
+# PORTMASTER: deadspace-portmaster.zip, Dead Space.sh
+```
+
+`package_portmaster.sh` genera `build/deadspace-portmaster.zip` y falla si el
+launcher está vacío, si la firma no coincide o si `unzip -t` encuentra daño. El
+paquete endurecido mide 8.018.225 bytes y tiene SHA256
+`4a4888f501d4d0a3c62d31415d55598929aee67bd79d9ea7713e290cfaaf06c5`.
+Sigue sin contener `libEAMGameDeadSpace.so` ni `assets/published`.
+
+El dry-run completo volvió a pasar con el Vita RIP real: 176 bibliotecas del
+host apartadas, importación eapx, biblioteca y assets publicados, portada
+normalizada, juego cargado, resumen propio, `pm_finish` y ningún gptokeyb vivo.
+
+Para el arte, `tools-metadata/ports_gamelist.py` ahora considera todas las
+copias `gamelist.xml.*`, incluida la manual de 19 entradas; combina el mayor
+`playcount` con el `lastplayed` más nuevo y sólo conserva imágenes que existen.
+La recuperación ensayada produjo 13 launchers existentes, 13 referencias de
+imagen válidas y ningún script viejo. Ese gamelist se instaló en la SD y se
+guardó también como `gamelist.xml.before-deadspace-retry-20260731`.
+
+Estado de la SD para el segundo ensayo, verificado después de `sync`:
+
+```text
+/roms/tools/PortMaster/autoinstall/deadspace-portmaster.zip  # 8.018.225 bytes
+/roms/ports/deadspace/deadspace.zip                          # único donor
+```
+
+No existen `Dead Space.sh`, binario, `gameinfo.xml`, assets importados ni entrada
+Dead Space en el gamelist: todavía es una preinstalación limpia. Los dos ZIP
+pasaron `unzip -t`; el donor conserva SHA256
+`04a71b975d0a9aa81b0388aee080f927903507cfbebddc8b57b8959f3eae2d31`.
+Para esta repetición hay que esperar el diálogo literal **Finished running
+autoinstall**, confirmarlo, dejar que PortMaster cierre y reiniciar desde el menú
+del firmware; no cortar alimentación mientras todavía muestra progreso.

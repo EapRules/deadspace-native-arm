@@ -45,8 +45,9 @@ it so the executable bit and EmulationStation entry are created correctly.
 
 1. Put the port release in PortMaster's `autoinstall/` directory. The release
    asset is named **`deadspace-portmaster.zip`** so it cannot be confused with
-   the Vita RIP donor's own `deadspace.zip`; PortMaster accepts any `.zip`
-   filename in this directory.
+   the Vita RIP donor's own `deadspace.zip`. Keep that exact filename: the root
+   launcher already carries the matching PortMaster signature, which avoids an
+   unnecessary in-place rewrite after extraction.
 
    | CFW | Autoinstall directory |
    |---|---|
@@ -78,10 +79,14 @@ it so the executable bit and EmulationStation entry are created correctly.
    easier to follow.
 
 3. Put the card back in the console and open PortMaster. It finds the release
-   in `autoinstall/`, installs it and adds the menu metadata.
+   in `autoinstall/`, installs it and adds the menu metadata. Wait for the exact
+   **Finished running autoinstall** dialog, acknowledge it and let PortMaster
+   return or close normally. Do not power off while its progress/file list is
+   still visible.
 
-4. Close PortMaster and **reboot the console**. Autoinstall does not refresh
-   the Ports list that EmulationStation loaded at boot.
+4. **Reboot the console through the firmware menu**, not by cutting power.
+   Autoinstall does not refresh the Ports list that EmulationStation loaded at
+   boot.
 
 5. Launch Dead Space from Ports. The first launch discovers the donor by
    content, extracts roughly 243-303 MiB into a temporary stage, validates
@@ -103,6 +108,9 @@ NeededFiles/data/deadspace/assets/... + NeededFiles/data/deadspace/lib/armeabi/.
 ### Two autoinstall gotchas
 
 - The game does not appear in Ports until the console is rebooted.
+- PortMaster rewrites unsigned launchers and the gamelist in place. An abrupt
+  power cut can leave either one at 0 bytes on an exFAT SD card. Wait for the
+  final autoinstall dialog and use the normal reboot/shutdown path.
 - Do not use **Reinstall** or **Uninstall** under Manage Ports. This independent
   release is not in PortMaster's catalogue, so those actions try to download a
   source that does not exist there and may remove the installed folder,
