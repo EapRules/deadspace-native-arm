@@ -127,7 +127,10 @@
     },
     {
       "path": "assets/published/layoutdata/layouts.xml.sb",
-      "sha256": "0f99badf5a7523ba0cc3e5749bf18b40807eb2d0fd11a66cc3c9c65656b4233a"
+      "sha256": [
+        "0f99badf5a7523ba0cc3e5749bf18b40807eb2d0fd11a66cc3c9c65656b4233a",
+        "c3c3e3e7fd81b92cd6c1789a535c66c540e5bdb9cfcd73315c9b223bc5c2a78d"
+      ]
     },
     {
       "path": "assets/published/maps/01_gov_01.scene.sb",
