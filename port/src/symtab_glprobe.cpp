@@ -30,6 +30,7 @@
 
 #include "so_util.h"
 #include "thunk_gen.h"
+#include "trace.h"
 
 /* Written by the game's thread, read by the loader's. */
 static std::atomic<int> g_shaders_ok(0);
@@ -163,6 +164,55 @@ extern "C" void probe_glTexImage2D(GLenum target, GLint level,
                format, type, pixels);
 }
 
+/*
+ * Geometry diagnostics for real devices.
+ *
+ * A black/cropped frame can be a correct draw into the wrong rectangle.
+ * Logging only changes, and only the first few, keeps LOADER_TRACE useful
+ * without turning every frame into hundreds of lines.
+ */
+extern "C" void probe_glViewport(GLint x, GLint y, GLsizei width,
+                                 GLsizei height)
+{
+    using Viewport = void (*)(GLint, GLint, GLsizei, GLsizei);
+    static Viewport viewport =
+        (Viewport)find_gles1_function("glViewport");
+    static GLint last_x = -1, last_y = -1;
+    static GLsizei last_w = -1, last_h = -1;
+    static int lines = 0;
+
+    if (lines < 24 &&
+        (x != last_x || y != last_y || width != last_w || height != last_h)) {
+        trace("GL viewport: x=%d y=%d width=%d height=%d",
+              x, y, width, height);
+        last_x = x; last_y = y; last_w = width; last_h = height;
+        lines++;
+    }
+    if (viewport)
+        viewport(x, y, width, height);
+}
+
+extern "C" void probe_glScissor(GLint x, GLint y, GLsizei width,
+                                GLsizei height)
+{
+    using Scissor = void (*)(GLint, GLint, GLsizei, GLsizei);
+    static Scissor scissor =
+        (Scissor)find_gles1_function("glScissor");
+    static GLint last_x = -1, last_y = -1;
+    static GLsizei last_w = -1, last_h = -1;
+    static int lines = 0;
+
+    if (lines < 24 &&
+        (x != last_x || y != last_y || width != last_w || height != last_h)) {
+        trace("GL scissor: x=%d y=%d width=%d height=%d",
+              x, y, width, height);
+        last_x = x; last_y = y; last_w = width; last_h = height;
+        lines++;
+    }
+    if (scissor)
+        scissor(x, y, width, height);
+}
+
 extern "C" long android_gl_draw_calls(void) { return g_draws.load(); }
 extern "C" long android_gl_textures_uploaded(void) { return g_textures.load(); }
 
@@ -182,5 +232,7 @@ DynLibFunction symtable_glprobe[] = {
     THUNK_SPECIFIC("glDrawArrays",    probe_glDrawArrays),
     THUNK_SPECIFIC("glDrawElements",  probe_glDrawElements),
     THUNK_SPECIFIC("glTexImage2D",    probe_glTexImage2D),
+    THUNK_SPECIFIC("glViewport",      probe_glViewport),
+    THUNK_SPECIFIC("glScissor",       probe_glScissor),
     { NULL, 0 },
 };

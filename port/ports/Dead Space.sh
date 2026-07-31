@@ -43,6 +43,8 @@ exec > "$GAMEDIR/log.txt" 2>&1
 
 export LD_LIBRARY_PATH="$GAMEDIR/libs.armhf${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
+export DEADSPACE_FACE_LAYOUT="${DEADSPACE_FACE_LAYOUT:-nintendo}"
+export LOADER_TRACE=1
 export AUDIODEV="${AUDIODEV:-plug:dmix}"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
 

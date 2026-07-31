@@ -459,3 +459,58 @@ port/src/symtab_io.cpp
 ```
 
 La zona congelada y `harness/verify.sh` permanecen intactos.
+
+### 11.9 Primer ensayo en R36S y build de diagnóstico
+
+El primer ensayo en hardware real confirmó que el paquete y el loader arrancan
+el juego. El usuario vio imagen y pudo cerrarlo normalmente, pero informó dos
+problemas:
+
+- la imagen aparece desplazada hacia la izquierda y algunos frames o zonas no
+  se ven;
+- los botones no permiten avanzar desde la primera pantalla.
+
+El `log.txt` de ese ensayo termina en la salida normal de PortMaster y no
+contiene `SIGSEGV` ni otro crash. Ese launcher todavía no exportaba
+`LOADER_TRACE=1`, por lo que el log no mostraba la geometría GL ni los eventos
+de entrada.
+
+La inspección de ports funcionales en la misma tarjeta aportó dos causas
+concretas para el mando:
+
+1. `src/main.cpp` sólo llamaba `SDL_Init(SDL_INIT_VIDEO)`, por lo que el
+   subsistema `SDL_INIT_GAMECONTROLLER` no tenía por qué enumerar el gamepad.
+2. En esta R36S, rotulada con layout Nintendo, el botón físico A (derecha)
+   llega como `SDL_CONTROLLER_BUTTON_B` y el físico B (abajo) como
+   `SDL_CONTROLLER_BUTTON_A`. El bridge anterior interpretaba esas letras como
+   layout Xbox y por lo tanto A enviaba Back en vez de Accept.
+
+La build instalada después de ese ensayo:
+
+- inicializa `SDL_INIT_GAMECONTROLLER`;
+- usa layout Nintendo por defecto, seleccionable mediante
+  `DEADSPACE_FACE_LAYOUT`;
+- registra cantidad de joysticks/controladores, botones, ejes y el keycode
+  Android enviado;
+- exporta `LOADER_TRACE=1` desde el launcher;
+- registra tamaño lógico/drawable de la ventana y los primeros cambios de
+  `glViewport` y `glScissor`.
+
+Las sondas de geometría sólo observan y reenvían a la tabla GLES1 viva; no
+cambian viewport, scissor ni escala. Por lo tanto, el problema de pantalla
+queda **diagnosticado pero aún no corregido** hasta obtener el próximo
+`log.txt` del dispositivo.
+
+Esta build volvió a pasar el harness inmutable en M7/7:
+
+```text
+[verify] M6 ok: assets=84 textures=11 draws=35670 nonblack=1
+[verify] M7 autopilot: injected 12 keys over 600 frames, scene changed 2 time(s)
+[verify] M7 ok
+```
+
+El binario de diagnóstico instalado directamente en la SD tiene SHA256:
+
+```text
+9b8d8ad942c7027014d31cf881388c1fe9ab771ccc3c4ee3292c94afa53d83db
+```

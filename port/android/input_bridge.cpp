@@ -76,6 +76,8 @@ static SDL_GameController *g_controllers[4] = {};
 static bool g_left_active = false;
 static bool g_right_active = false;
 static int16_t g_lx = 0, g_ly = 0, g_rx = 0, g_ry = 0;
+static Uint8 g_accept_button = SDL_CONTROLLER_BUTTON_B;
+static Uint8 g_back_button = SDL_CONTROLLER_BUTTON_A;
 
 static bool g_autopilot = false;
 static long g_auto_keys = 0;
@@ -97,9 +99,12 @@ static const int kAutopilotKeys[] = {
 
 static int map_button(Uint8 button)
 {
+    if (button == g_accept_button)
+        return AKEYCODE_DPAD_CENTER;
+    if (button == g_back_button)
+        return AKEYCODE_BACK;
+
     switch (button) {
-    case SDL_CONTROLLER_BUTTON_A:             return AKEYCODE_DPAD_CENTER;
-    case SDL_CONTROLLER_BUTTON_B:             return AKEYCODE_BACK;
     case SDL_CONTROLLER_BUTTON_X:             return AKEYCODE_BUTTON_X;
     case SDL_CONTROLLER_BUTTON_Y:             return AKEYCODE_BUTTON_Y;
     case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:  return AKEYCODE_BUTTON_L1;
@@ -217,15 +222,33 @@ void android_input_init(so_module *mod, JNIEnv *env, int width, int height)
     const char *auto_env = getenv("DEADSPACE_AUTOPILOT");
     g_autopilot = auto_env && *auto_env && strcmp(auto_env, "0") != 0;
 
-    int opened = 0;
+    /*
+     * SDL names face buttons by position. R36S-class handhelds are lettered
+     * Nintendo-style: their physical A (right) arrives as SDL B, while their
+     * physical B (bottom) arrives as SDL A. This is measured on the same
+     * device by the working Minigore/Ice Rage ports.
+     */
+    const char *layout = getenv("DEADSPACE_FACE_LAYOUT");
+    if (layout && strcmp(layout, "xbox") == 0) {
+        g_accept_button = SDL_CONTROLLER_BUTTON_A;
+        g_back_button = SDL_CONTROLLER_BUTTON_B;
+    }
+
+    int available = SDL_NumJoysticks();
     for (int i = 0; i < SDL_NumJoysticks(); i++) {
         open_controller(i);
-        if (SDL_IsGameController(i))
-            opened++;
     }
-    trace("input bridge: JNI keys=%s pointer=%s controllers=%d%s",
+    int opened = 0;
+    for (SDL_GameController *controller : g_controllers)
+        if (controller)
+            opened++;
+
+    trace("input bridge: JNI keys=%s pointer=%s joysticks=%d controllers=%d "
+          "face-layout=%s%s",
           g_key_down && g_key_up ? "yes" : "no", g_pointer ? "yes" : "no",
-          opened, g_autopilot ? " autopilot=on" : "");
+          available, opened,
+          g_accept_button == SDL_CONTROLLER_BUTTON_B ? "Nintendo" : "Xbox",
+          g_autopilot ? " autopilot=on" : "");
 }
 
 bool android_input_event(const SDL_Event *event)
@@ -253,11 +276,22 @@ bool android_input_event(const SDL_Event *event)
     case SDL_CONTROLLERBUTTONDOWN:
     case SDL_CONTROLLERBUTTONUP: {
         int code = map_button(event->cbutton.button);
+        trace("input: controller button=%u %s -> Android key=%d",
+              (unsigned int)event->cbutton.button,
+              event->type == SDL_CONTROLLERBUTTONDOWN ? "down" : "up", code);
         if (code)
             send_key(code, event->type == SDL_CONTROLLERBUTTONDOWN);
         break;
     }
     case SDL_CONTROLLERAXISMOTION:
+        {
+        static int axis_lines = 0;
+        if (axis_lines < 24 && abs((int)event->caxis.value) > 4000) {
+            trace("input: controller axis=%u value=%d",
+                  (unsigned int)event->caxis.axis,
+                  (int)event->caxis.value);
+            axis_lines++;
+        }
         switch (event->caxis.axis) {
         case SDL_CONTROLLER_AXIS_LEFTX:  g_lx = event->caxis.value; break;
         case SDL_CONTROLLER_AXIS_LEFTY:  g_ly = event->caxis.value; break;
@@ -267,6 +301,7 @@ bool android_input_event(const SDL_Event *event)
         }
         update_sticks();
         break;
+        }
     case SDL_KEYDOWN:
     case SDL_KEYUP:
         if (event->key.keysym.sym == SDLK_ESCAPE)

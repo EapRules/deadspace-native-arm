@@ -238,8 +238,8 @@ int main(int argc, char **argv)
     SDL_Window   *window = NULL;
     SDL_GLContext gl     = NULL;
 
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        trace("SDL_Init(video) failed: %s", SDL_GetError());
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
+        trace("SDL_Init(video+gamecontroller) failed: %s", SDL_GetError());
     } else {
         /*
          * Fixed function, whichever way this machine provides it.
@@ -307,6 +307,12 @@ int main(int argc, char **argv)
 
     if (gl) {
         load_gles1_funcs();
+
+        int window_w = 0, window_h = 0, drawable_w = 0, drawable_h = 0;
+        SDL_GetWindowSize(window, &window_w, &window_h);
+        SDL_GL_GetDrawableSize(window, &drawable_w, &drawable_h);
+        trace("window geometry: logical=%dx%d drawable=%dx%d",
+              window_w, window_h, drawable_w, drawable_h);
 
         const GLubyte *(*get_string)(GLenum) =
             (const GLubyte *(*)(GLenum))SDL_GL_GetProcAddress("glGetString");
