@@ -264,13 +264,33 @@ void InputStream::closeStream(JNIEnv *env, jobject obj)
 /*
  * AssetManager.list().
  *
- * Android returns the bare names directly under `path`. The reference returns
- * absolute paths for the whole subtree instead, and that is the version this
- * engine is known to work against, so it is the version implemented here -
- * matching Android exactly would be a change of behaviour on a path with no
- * way to observe which one the engine wants.
+ * Android returns the bare names directly under `path`, including directory
+ * names without a trailing slash. EAIO calls list("") and appends a slash to
+ * extensionless entries before looking for "published/". Returning absolute
+ * or recursive names prevents that exact match and leaves the asset backend
+ * without its content root.
  */
-static void list_tree(const char *dir, char ***out, size_t *count, size_t *cap)
+static bool append_asset_name(const char *name, char ***out,
+                              size_t *count, size_t *cap)
+{
+    if (*count == *cap) {
+        size_t next = *cap ? *cap * 2 : 256;
+        char **grown = (char **)realloc(*out, next * sizeof(char *));
+        if (!grown)
+            return false;
+        *out = grown;
+        *cap = next;
+    }
+
+    (*out)[*count] = strdup(name);
+    if (!(*out)[*count])
+        return false;
+    (*count)++;
+    return true;
+}
+
+static void list_level(const char *dir, char ***out,
+                       size_t *count, size_t *cap)
 {
     DIR *d = opendir(dir);
     if (!d)
@@ -281,27 +301,8 @@ static void list_tree(const char *dir, char ***out, size_t *count, size_t *cap)
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
             continue;
 
-        char child[PATH_MAX];
-        snprintf(child, sizeof(child), "%s/%s", dir, entry->d_name);
-
-        struct stat st;
-        if (stat(child, &st) != 0)
-            continue;
-
-        if (S_ISDIR(st.st_mode)) {
-            list_tree(child, out, count, cap);
-            continue;
-        }
-
-        if (*count == *cap) {
-            size_t next = *cap ? *cap * 2 : 256;
-            char **grown = (char **)realloc(*out, next * sizeof(char *));
-            if (!grown)
-                break;
-            *out = grown;
-            *cap = next;
-        }
-        (*out)[(*count)++] = strdup(child);
+        if (!append_asset_name(entry->d_name, out, count, cap))
+            break;
     }
 
     closedir(d);
@@ -313,12 +314,26 @@ jobjectArray InputStream::listAssets(JNIEnv *env, jobject obj, jstring path)
 
     const char *asset = path ? ((String *)path)->str : "";
     char dir[PATH_MAX];
-    const char *resolved = resolve_asset(*asset ? asset : ".", dir, sizeof(dir));
+    const char *resolved;
+    if (*asset) {
+        resolved = resolve_asset(asset, dir, sizeof(dir));
+    } else {
+        /*
+         * Do not spell the asset root as "<root>/assets/.".
+         *
+         * The working Vita implementation concatenates its assets prefix with
+         * the empty argument and therefore enumerates the root without this
+         * extra component. Match that exact host path shape while enumerating
+         * the first level.
+         */
+        snprintf(dir, sizeof(dir), "%s/assets", io_game_dir());
+        resolved = dir;
+    }
 
     char **names = NULL;
     size_t count = 0, cap = 0;
     if (resolved)
-        list_tree(resolved, &names, &count, &cap);
+        list_level(resolved, &names, &count, &cap);
 
     trace("assets: list '%s' -> '%s' (%zu entries)", asset,
           resolved ? resolved : "(null)", count);
@@ -333,7 +348,14 @@ jobjectArray InputStream::listAssets(JNIEnv *env, jobject obj, jstring path)
     array->elements       = calloc(count ? count : 1, sizeof(String));
 
     for (size_t i = 0; i < count; i++) {
-        new ((char *)array->elements + i * sizeof(String)) String(names[i]);
+        /*
+         * Select the copying constructor deliberately. names[i] is `char *`,
+         * which otherwise selects String(char *) - the ownership-taking
+         * overload - and the free directly below leaves every array element
+         * pointing at released storage.
+         */
+        new ((char *)array->elements + i * sizeof(String))
+            String((const char *)names[i]);
         free(names[i]);
     }
     free(names);

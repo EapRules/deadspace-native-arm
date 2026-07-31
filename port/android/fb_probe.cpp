@@ -26,11 +26,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Not -I'd: the GL loader lives with the Khronos thunks. Reaching it by path
- * keeps the probe on the same function pointers the game itself calls. */
+/* Not -I'd: the GL types live with the Khronos thunks. */
 #include "thunks/khronos/glad.h"
 
 #include "fb_probe.h"
+#include "so_util.h"
 #include "trace.h"
 
 /* One in this many frames is read back while the screen is still black. */
@@ -49,6 +49,23 @@ static int            g_interval = -1;      /* <0 = not read from the env yet */
 static int            g_threshold = DEFAULT_THRESHOLD;
 static unsigned char *g_buf      = NULL;
 static size_t         g_buf_size = 0;
+
+/*
+ * The fixed-function loader keeps its driver pointers private to gles1.cpp.
+ * The GLES2 glad globals in glad.h are a different table and are intentionally
+ * never initialised for this game. Resolve the five integer-only functions
+ * from the live GLES1 symbol table instead; none needs a softfp bridge.
+ */
+extern DynLibFunction symtable_gles1[];
+
+static uintptr_t find_gles1_function(const char *name)
+{
+    for (int i = 0; symtable_gles1[i].symbol; i++) {
+        if (strcmp(symtable_gles1[i].symbol, name) == 0)
+            return symtable_gles1[i].func;
+    }
+    return 0;
+}
 
 static int env_int(const char *name, int def)
 {
@@ -85,10 +102,26 @@ void android_fb_probe(long frame, int width, int height)
     if (width <= 0 || height <= 0)
         return;
 
-    /* The GL entry points are resolved lazily by the game's first GL call; if
-     * they are still null the game has not drawn anything anyway. */
-    if (!glad_glReadPixels || !glad_glGetIntegerv || !glad_glGetError ||
-        !glad_glBindFramebuffer || !glad_glPixelStorei) {
+    using ReadPixels = void (*)(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum,
+                                void *);
+    using GetIntegerv = void (*)(GLenum, GLint *);
+    using GetError = GLenum (*)(void);
+    using BindFramebuffer = void (*)(GLenum, GLuint);
+    using PixelStorei = void (*)(GLenum, GLint);
+
+    static ReadPixels read_pixels =
+        (ReadPixels)find_gles1_function("glReadPixels");
+    static GetIntegerv get_integerv =
+        (GetIntegerv)find_gles1_function("glGetIntegerv");
+    static GetError get_error =
+        (GetError)find_gles1_function("glGetError");
+    static BindFramebuffer bind_framebuffer =
+        (BindFramebuffer)find_gles1_function("glBindFramebufferOES");
+    static PixelStorei pixel_storei =
+        (PixelStorei)find_gles1_function("glPixelStorei");
+
+    if (!read_pixels || !get_integerv || !get_error ||
+        !bind_framebuffer || !pixel_storei) {
         trace("framebuffer probe disabled: GL entry points unresolved");
         g_done = true;
         return;
@@ -110,32 +143,32 @@ void android_fb_probe(long frame, int width, int height)
      * This is the probe's only side effect on the game and the reason it stops
      * running the moment it has an answer. */
     bool had_pending = false;
-    while (glad_glGetError() != GL_NO_ERROR)
+    while (get_error() != GL_NO_ERROR)
         had_pending = true;
 
     /* The game normally swaps with the default framebuffer bound, but if it
      * left an FBO bound we would be reading its offscreen target instead of
      * what reaches the screen. */
     GLint prev_fbo = 0;
-    glad_glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
+    get_integerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
     if (prev_fbo != 0)
-        glad_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        bind_framebuffer(GL_FRAMEBUFFER, 0);
 
     GLint prev_align = 4;
-    glad_glGetIntegerv(GL_PACK_ALIGNMENT, &prev_align);
+    get_integerv(GL_PACK_ALIGNMENT, &prev_align);
     if (prev_align != 1)
-        glad_glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        pixel_storei(GL_PACK_ALIGNMENT, 1);
 
     memset(g_buf, 0, need);
-    glad_glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, g_buf);
+    read_pixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, g_buf);
 
-    GLenum err = glad_glGetError();
+    GLenum err = get_error();
 
     if (prev_align != 1)
-        glad_glPixelStorei(GL_PACK_ALIGNMENT, prev_align);
+        pixel_storei(GL_PACK_ALIGNMENT, prev_align);
     if (prev_fbo != 0)
-        glad_glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)prev_fbo);
-    while (glad_glGetError() != GL_NO_ERROR)
+        bind_framebuffer(GL_FRAMEBUFFER, (GLuint)prev_fbo);
+    while (get_error() != GL_NO_ERROR)
         ;
 
     if (err != GL_NO_ERROR) {

@@ -3,9 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
-#include <string.h>
 #include <iterator>
 #include <algorithm>
+#include <vector>
 
 #include "platform.h"
 #include "jni.h"
@@ -378,16 +378,119 @@ ABI_ATTR static jfieldID iface_GetStaticFieldID(JNIEnv *env, jclass clazz, const
     return NULL;
 }
 
+static uint32_t decode_utf8(const unsigned char **cursor)
+{
+    const unsigned char *p = *cursor;
+    uint32_t value;
+    size_t continuation;
+
+    if (*p < 0x80) {
+        *cursor = p + 1;
+        return *p;
+    }
+    if ((*p & 0xe0) == 0xc0) {
+        value = *p & 0x1f;
+        continuation = 1;
+    } else if ((*p & 0xf0) == 0xe0) {
+        value = *p & 0x0f;
+        continuation = 2;
+    } else if ((*p & 0xf8) == 0xf0) {
+        value = *p & 0x07;
+        continuation = 3;
+    } else {
+        *cursor = p + 1;
+        return 0xfffd;
+    }
+
+    p++;
+    for (size_t i = 0; i < continuation; i++) {
+        if ((p[i] & 0xc0) != 0x80) {
+            *cursor = p;
+            return 0xfffd;
+        }
+        value = (value << 6) | (p[i] & 0x3f);
+    }
+    *cursor = p + continuation;
+
+    const uint32_t minimum[] = {0, 0x80, 0x800, 0x10000};
+    if (value < minimum[continuation] || value > 0x10ffff ||
+        (value >= 0xd800 && value <= 0xdfff))
+        return 0xfffd;
+    return value;
+}
+
+static std::vector<jchar> utf8_to_utf16(const char *text)
+{
+    std::vector<jchar> result;
+    if (!text)
+        return result;
+
+    const unsigned char *cursor = (const unsigned char *)text;
+    while (*cursor) {
+        uint32_t value = decode_utf8(&cursor);
+        if (value <= 0xffff) {
+            result.push_back((jchar)value);
+        } else {
+            value -= 0x10000;
+            result.push_back((jchar)(0xd800 + (value >> 10)));
+            result.push_back((jchar)(0xdc00 + (value & 0x3ff)));
+        }
+    }
+    return result;
+}
+
+static void append_utf8(std::vector<char> &result, uint32_t value)
+{
+    if (value <= 0x7f) {
+        result.push_back((char)value);
+    } else if (value <= 0x7ff) {
+        result.push_back((char)(0xc0 | (value >> 6)));
+        result.push_back((char)(0x80 | (value & 0x3f)));
+    } else if (value <= 0xffff) {
+        result.push_back((char)(0xe0 | (value >> 12)));
+        result.push_back((char)(0x80 | ((value >> 6) & 0x3f)));
+        result.push_back((char)(0x80 | (value & 0x3f)));
+    } else {
+        result.push_back((char)(0xf0 | (value >> 18)));
+        result.push_back((char)(0x80 | ((value >> 12) & 0x3f)));
+        result.push_back((char)(0x80 | ((value >> 6) & 0x3f)));
+        result.push_back((char)(0x80 | (value & 0x3f)));
+    }
+}
+
+static std::vector<char> utf16_to_utf8(const jchar *text, jsize length)
+{
+    std::vector<char> result;
+    for (jsize i = 0; text && i < length; i++) {
+        uint32_t value = text[i];
+        if (value >= 0xd800 && value <= 0xdbff &&
+            i + 1 < length &&
+            text[i + 1] >= 0xdc00 && text[i + 1] <= 0xdfff) {
+            value = 0x10000 +
+                ((value - 0xd800) << 10) +
+                (text[++i] - 0xdc00);
+        } else if (value >= 0xd800 && value <= 0xdfff) {
+            value = 0xfffd;
+        }
+        append_utf8(result, value);
+    }
+    result.push_back('\0');
+    return result;
+}
+
 ABI_ATTR static jstring iface_NewString(JNIEnv *env, const jchar* unicodeChars, jsize len)
 {
-    String *str = new String((const char *)unicodeChars);
+    std::vector<char> utf8 = utf16_to_utf8(unicodeChars, len);
+    String *str = new String((const char *)utf8.data());
     return (jstring)str;
 }
 
 ABI_ATTR static jsize iface_GetStringLength(JNIEnv *env, jstring jstr)
 {
     String *str = (String*)jstr;
-    return strlen(str->str);
+    return str && str->str
+        ? (jsize)utf8_to_utf16(str->str).size()
+        : 0;
 }
 
 ABI_ATTR static const jchar* iface_GetStringChars(JNIEnv *env, jstring jstr, jboolean* isCopy)
@@ -395,11 +498,16 @@ ABI_ATTR static const jchar* iface_GetStringChars(JNIEnv *env, jstring jstr, jbo
     String *str = (String*)jstr;
     if (isCopy)
         *isCopy = JNI_TRUE;
-   
-    if (str->str == NULL)
+
+    if (!str || !str->str)
         return NULL;
-   
-    return (jchar *)strdup(str->str);
+
+    std::vector<jchar> utf16 = utf8_to_utf16(str->str);
+    jchar *copy = (jchar *)calloc(utf16.size() + 1, sizeof(jchar));
+    if (!copy)
+        return NULL;
+    std::copy(utf16.begin(), utf16.end(), copy);
+    return copy;
 }
 
 ABI_ATTR static void iface_ReleaseStringChars(JNIEnv *env, jstring jstr, const jchar* chars)

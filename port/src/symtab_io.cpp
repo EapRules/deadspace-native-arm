@@ -71,6 +71,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <atomic>
 
 #include "so_util.h"
 #include "thunk_gen.h"
@@ -81,6 +82,7 @@
  * outlive nothing in particular but the value has to be readable from any
  * thread the engine starts. */
 static char g_game_dir[PATH_MAX] = "/game";
+static std::atomic<long> g_assets_opened(0);
 
 void io_set_game_dir(const char *dir)
 {
@@ -181,6 +183,18 @@ static void trace_path(const char *what, const char *orig, const char *fixed, in
           rc >= 0 ? "ok" : "ENOENT");
 }
 
+/*
+ * Count successful content-file opens, not probes, directories, saves or
+ * configuration. The path has already passed through fix_path(), so the
+ * extracted asset tree is the stable boundary regardless of which spelling
+ * the engine used (appbundle:, Android/data/... or its VFS mount).
+ */
+static void count_asset_open(const char *fixed, bool succeeded)
+{
+    if (succeeded && fixed && strstr(fixed, "/assets/published/"))
+        g_assets_opened.fetch_add(1, std::memory_order_relaxed);
+}
+
 /* Declared in thunks/libc/generated/impl_header.h, which pulls in the whole
  * generated prototype set; only this one is needed, so it is re-declared with
  * matching C++ linkage instead. */
@@ -199,6 +213,7 @@ int bionic_open(const char *path, int flags, mode_t mode)
     char buf[PATH_MAX];
     const char *fixed = fix_path(path, buf, sizeof(buf));
     int fd = open(fixed, flags, mode);
+    count_asset_open(fixed, fd >= 0);
     trace_path("open", path, fixed, fd);
     return fd;
 }
@@ -217,8 +232,14 @@ void *bionic_fopen(const char *path, const char *mode)
     char buf[PATH_MAX];
     const char *fixed = fix_path(path, buf, sizeof(buf));
     void *f = fopen_impl(fixed, mode);
+    count_asset_open(fixed, f != NULL);
     trace_path("fopen", path, fixed, f ? 0 : -1);
     return f;
+}
+
+long android_io_assets_opened(void)
+{
+    return g_assets_opened.load(std::memory_order_relaxed);
 }
 
 void *bionic_opendir(const char *path)

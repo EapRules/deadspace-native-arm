@@ -183,13 +183,14 @@ DynLibFunction *so_dynamic_libraries[] = {
     symtable_android,
     symtable_log,
     symtable_egl,
-    /* Shadows two entries of symtable_gles2 to read back the compile/link
-     * status the game never prints; must therefore come before it. */
+    /* Counts draw calls for the content milestone and, for GLES2 games, reads
+     * compile/link status. It must precede both GL tables; its draw wrappers
+     * forward through the live GLES1 table used by this fixed-function game. */
     symtable_glprobe,
     /* Fixed function, and the only GL table this game needs: it imports 190
      * GLES 1.1 entry points and not one shader call. symtable_gles2 stays in
-     * the list below it because it costs nothing and the two do not overlap -
-     * no name is in both - but every gl* the game asks for is answered here. */
+     * the list below it for ports that also carry GLES2 imports; shared names
+     * such as glDrawElements are intercepted by symtable_glprobe above. */
     symtable_gles1,
     symtable_gles2,
     symtable_opensles,

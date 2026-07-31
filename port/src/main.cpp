@@ -52,9 +52,15 @@
 #include "classes/media_AudioTrack.h"
 
 #include "crash.h"
+#include "fb_probe.h"
 #include "fix_path.h"
+#include "input_bridge.h"
 #include "patch.h"
 #include "trace.h"
+
+extern "C" long android_io_assets_opened(void);
+extern "C" long android_gl_textures_uploaded(void);
+extern "C" long android_gl_draw_calls(void);
 
 /*
  * The library, and where it lives inside the game tree.
@@ -448,6 +454,8 @@ int main(int argc, char **argv)
         trace("visibility changed");
     }
 
+    android_input_init(mod, env, kWidth, kHeight);
+
     /*
      * A bounded run. DEADSPACE_FRAME_LIMIT stops the process after that many
      * frames so an automated run terminates on a fact rather than on a
@@ -460,9 +468,11 @@ int main(int argc, char **argv)
     while (frame_limit == 0 || frames < frame_limit) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            if (ev.type == SDL_QUIT)
+            if (!android_input_event(&ev))
                 goto done;
         }
+
+        android_input_autopilot_tick(frames);
 
         /* The first frame gets its own line. "surface created" followed by
          * nothing was ambiguous for several sessions: it could mean the fault
@@ -481,8 +491,13 @@ int main(int argc, char **argv)
         if (frames <= 5)
             trace("<- NativeOnDrawFrame #%ld returned", frames);
 
-        if (window)
+        if (window) {
+            int w = 0, h = 0;
+            SDL_GL_GetDrawableSize(window, &w, &h);
+            android_fb_probe(frames, w, h);
+            android_input_autopilot_sample(frames);
             SDL_GL_SwapWindow(window);
+        }
 
         /* One line per frame would drown the log; the harness reads the last
          * one, so the cadence only has to be fine enough to be current. */
@@ -496,6 +511,11 @@ int main(int argc, char **argv)
 
 done:
     trace("frames=%ld", frames);
+    trace("summary assets=%ld textures=%ld draws=%ld",
+          android_io_assets_opened(), android_gl_textures_uploaded(),
+          android_gl_draw_calls());
+    trace("autopilot keys=%ld scenes=%ld",
+          android_input_autopilot_keys(), android_input_autopilot_scenes());
     trace("run finished: %ld frames", frames);
 
     /*

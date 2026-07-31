@@ -16,13 +16,14 @@
  * is reported verbatim. A shader that does not compile makes the milestone
  * fail, which is the point.
  *
- * The table below is listed *before* symtable_gles2 in so_dynamic_libraries,
- * so the game binds these instead of the raw entry points. The glad_gl*
- * pointers still hold the driver's own functions - the same split the vendored
- * glShaderSource_dump uses.
+ * The table below is listed before both GL tables in so_dynamic_libraries, so
+ * the game binds these instead of the raw entry points. Shader calls forward
+ * through the GLES2 glad globals. Draw calls must select the live GLES1 table:
+ * this fixed-function game never initialises the separate GLES2 glad globals.
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <atomic>
 
 #include "khronos/glad.h"
@@ -36,6 +37,18 @@ static std::atomic<int> g_shaders_failed(0);
 static std::atomic<int> g_programs_ok(0);
 static std::atomic<int> g_programs_failed(0);
 static std::atomic<long> g_draws(0);
+static std::atomic<long> g_textures(0);
+
+extern DynLibFunction symtable_gles1[];
+
+static uintptr_t find_gles1_function(const char *name)
+{
+    for (int i = 0; symtable_gles1[i].symbol; i++) {
+        if (strcmp(symtable_gles1[i].symbol, name) == 0)
+            return symtable_gles1[i].func;
+    }
+    return 0;
+}
 
 static void dump_log(const char *what, unsigned int obj, bool is_shader)
 {
@@ -99,11 +112,11 @@ extern "C" void probe_glLinkProgram(GLuint program)
 /*
  * Draw calls.
  *
- * GLES2 has exactly two of them, and the engine's imports confirm it uses
- * both. Counting here rather than in the frame loop is the difference the
- * milestone cares about: a game that clears the screen to a colour and
- * presents it swaps buffers just as happily as one that renders, so frames are
- * not evidence of content. A draw call is.
+ * The game imports exactly these two draw entry points. Counting here rather
+ * than in the frame loop is the difference the milestone cares about: a game
+ * that clears the screen to a colour and presents it swaps buffers just as
+ * happily as one that renders, so frames are not evidence of content. A draw
+ * call is.
  *
  * Neither wrapper inspects or rewrites its arguments; they are forwarded
  * verbatim to the driver, so a miscount is the only thing that can go wrong
@@ -112,17 +125,46 @@ extern "C" void probe_glLinkProgram(GLuint program)
 extern "C" void probe_glDrawArrays(GLenum mode, GLint first, GLsizei count)
 {
     g_draws++;
-    glad_glDrawArrays(mode, first, count);
+    using DrawArrays = void (*)(GLenum, GLint, GLsizei);
+    static DrawArrays draw =
+        (DrawArrays)find_gles1_function("glDrawArrays");
+    if (draw)
+        draw(mode, first, count);
 }
 
 extern "C" void probe_glDrawElements(GLenum mode, GLsizei count, GLenum type,
                                      const void *indices)
 {
     g_draws++;
-    glad_glDrawElements(mode, count, type, indices);
+    using DrawElements = void (*)(GLenum, GLsizei, GLenum, const void *);
+    static DrawElements draw =
+        (DrawElements)find_gles1_function("glDrawElements");
+    if (draw)
+        draw(mode, count, type, indices);
+}
+
+/*
+ * Texture uploads are the fixed-function equivalent of a material becoming
+ * live GPU content. The dimensions are deliberately not filtered: mip levels
+ * and small UI textures are still real uploads performed by the engine.
+ */
+extern "C" void probe_glTexImage2D(GLenum target, GLint level,
+                                   GLint internalformat, GLsizei width,
+                                   GLsizei height, GLint border, GLenum format,
+                                   GLenum type, const void *pixels)
+{
+    g_textures++;
+    using TexImage2D = void (*)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint,
+                                GLenum, GLenum, const void *);
+    static TexImage2D upload =
+        (TexImage2D)find_gles1_function("glTexImage2D");
+    if (upload)
+        upload(target, level, internalformat, width, height, border,
+               format, type, pixels);
 }
 
 extern "C" long android_gl_draw_calls(void) { return g_draws.load(); }
+extern "C" long android_gl_textures_uploaded(void) { return g_textures.load(); }
 
 extern "C" int android_gl_shaders_compiled(void) { return g_shaders_ok.load(); }
 extern "C" int android_gl_shaders_failed(void)   { return g_shaders_failed.load(); }
@@ -131,13 +173,14 @@ extern "C" int android_gl_programs_failed(void)  { return g_programs_failed.load
 
 /*
  * Neither function takes or returns a float, so select_either() hands the game
- * the pointer directly with no ABI bridge - same as the entries these shadow
- * in symtable_gles2.
+ * the pointer directly with no ABI bridge - same as the GLES1 entries these
+ * shadow.
  */
 DynLibFunction symtable_glprobe[] = {
     THUNK_SPECIFIC("glCompileShader", probe_glCompileShader),
     THUNK_SPECIFIC("glLinkProgram",   probe_glLinkProgram),
     THUNK_SPECIFIC("glDrawArrays",    probe_glDrawArrays),
     THUNK_SPECIFIC("glDrawElements",  probe_glDrawElements),
+    THUNK_SPECIFIC("glTexImage2D",    probe_glTexImage2D),
     { NULL, 0 },
 };

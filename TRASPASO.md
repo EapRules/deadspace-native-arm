@@ -1,10 +1,17 @@
 # Dead Space — traspaso técnico
 
-Estado al momento de escribir esto: **M4 de 7**. El motor carga su contenido,
-dibuja **un frame completo**, entra al segundo y no vuelve.
+Estado actual (actualización ChatGPT/Codex, 2026-07-30): **M7 de 7**. El
+verificador inmutable completa 600 frames, carga contenido, sube texturas,
+dibuja una imagen no negra y demuestra dos cambios de escena después de input
+JNI sintético.
 
 Este documento es para que otro agente continúe sin repetir nada. Lo que está en
 `HALLAZGOS.md` es el triage del juego; esto es el estado de la investigación.
+
+Las secciones 1–10 preservan el traspaso histórico escrito durante la sesión de
+Claude, cuando el estado todavía era M4/7. La sección 11 separa explícitamente
+el trabajo posterior realizado por **ChatGPT/Codex (GPT-5)**, para que otro
+agente pueda atribuir cada cambio y no vuelva a investigar el bloqueo viejo.
 
 ---
 
@@ -256,3 +263,199 @@ siete, y esos estaban mal.
 Y lo tercero: **muestra chica miente.** Saqué el atraso de hilos con dos corridas
 por valor que dieron idéntico. Con seis: sin atraso 5/6 en un sitio y 1/6 en otro.
 Tuve que revertirlo.
+
+---
+
+## 11. Actualización de ChatGPT/Codex (GPT-5) — M4 → M7
+
+**Autor de esta sección y de los cambios enumerados abajo:** ChatGPT/Codex,
+modelo GPT-5, sesión del 30 de julio de 2026. El trabajo de las secciones
+anteriores y los commits hasta `4390fa3` fue heredado de la sesión de Claude.
+
+### 11.1 Resultado verificable
+
+Corrida final del árbitro de solo lectura `port/harness/verify.sh`:
+
+```text
+[verify] M1 ok
+[verify] M2 ok (0 unresolved symbols)
+[verify] M3 ok
+[verify] M4 ok
+[verify] M5 ok (600 frames)
+[verify] M6 counters: assets=84 textures=11 draws=36348 nonblack=1
+[verify] M6 ok (assets=84 textures=11 draws=36348, survived)
+[verify] M7 autopilot: injected 12 keys over 600 frames, scene changed 2 time(s)
+[verify] M7 ok
+[verify] === milestone reached: 7 / 7 ===
+```
+
+El harness no fue modificado. También se ejecutó un dry-run del launcher en un
+contenedor PortMaster descartable, quitando del sistema las bibliotecas que el
+paquete afirma transportar; pasó carga del módulo, resumen final, limpieza de
+gptokeyb y código de salida cero.
+
+### 11.2 Cómo se destrabó el frame 2
+
+El vector vacío de `+0x2dd454` no era un allocator roto. Era el resultado de
+pedir un provider de VFS para `/published/...` y recibir `NULL`.
+
+La evidencia dinámica mostró estos montajes:
+
+```text
+/game/published             -> /var
+/game/var                   -> /var
+/game/ea/deadspace/         -> /
+```
+
+El parser de rutas de VFS (`+0x302920`) salta el slash inicial. El lookup
+(`+0x30ba38`) empieza por el primer componente con nombre y sólo selecciona un
+provider al encontrar ese nodo. Por eso un provider montado en el nodo raíz
+`/` nunca atendía `/published/...`.
+
+Un experimento controlado montó el mismo backend una segunda vez:
+
+```text
+source: /game/ea/deadspace/published
+mount:  /published
+```
+
+Con ese único cambio, los providers dejaron de ser nulos y el run pasó de un
+frame a 120/120. El arreglo permanente está en `port/src/patch.cpp`:
+
+- valida que el call site `+0x1c3d7c` contenga `0xeb05265c`;
+- reemplaza sólo ese `BL` de startup por un trampoline ARM de dos words;
+- el wrapper llama primero al montaje original;
+- clona la metadata de cinco words de los strings UTF-16 EASTL;
+- llama al provider original `+0x30d6f4` una segunda vez para `/published`.
+
+No se reengancha una rutina global y no se alterna código en runtime.
+
+### 11.3 Bugs JNI/AssetManager encontrados durante la prueba
+
+`port/jni/classes/android_assets.cpp` tenía dos desacuerdos con Android:
+
+1. `AssetManager.list()` devolvía rutas recursivas. Android devuelve sólo los
+   nombres del nivel pedido, incluyendo subdirectorios sin slash final. El
+   motor concatena el slash él mismo y buscaba literalmente `published`.
+2. `String(names[i])` elegía el constructor que toma propiedad de un `char *`.
+   Después el caller liberaba ese mismo buffer: ownership doble. Se fuerza el
+   constructor copiador con `String((const char *)names[i])`.
+
+`port/jni/jni.cpp` trataba bytes UTF-8 como unidades UTF-16 en `NewString`,
+`GetStringLength` y `GetStringChars`. Se agregaron conversiones UTF-8 ↔ UTF-16
+reales, incluyendo pares sustitutos. Esto importa en rutas/locales aunque los
+primeros nombres ASCII parecieran funcionar.
+
+### 11.4 El crash GL que apareció después de cargar contenido
+
+Una vez arreglado VFS, el crash cambió a:
+
+```text
+pc = 0
+lr = +0x3244e0
+call = glDrawElements@plt
+```
+
+El import estaba interceptado por `probe_glDrawElements`, pero el wrapper
+reenviaba a la global GLES2 `glad_glDrawElements`, que nunca se inicializa en
+este juego fixed-function. La tabla viva era GLES1 (190/190). El tail-call
+conservaba el LR del motor, de ahí la forma del crash.
+
+`port/src/symtab_glprobe.cpp` ahora busca `glDrawArrays`,
+`glDrawElements` y `glTexImage2D` en `symtable_gles1`, cuenta las llamadas y
+reenvía a esos punteros. No se tocó la zona congelada
+`thunks/khronos/gles1.cpp`/`gles1_funcs.hpp`.
+
+### 11.5 Métricas de M6
+
+- `port/src/symtab_io.cpp` cuenta únicamente opens exitosos dentro de
+  `/assets/published/`; no cuenta probes fallidos, directorios, config ni saves.
+- `port/src/symtab_glprobe.cpp` cuenta uploads reales de `glTexImage2D` y draw
+  calls, reenviando todos los argumentos sin modificarlos.
+- `port/android/fb_probe.cpp` resolvía globals de GLES2 que están a cero. Ahora
+  toma las cinco funciones integer-only de la tabla GLES1 viva, incluido
+  `glBindFramebufferOES`.
+- Este build no llama el `eglSwapBuffers` del shim; `src/main.cpp` es quien
+  presenta. La sonda se movió al punto real, antes de `SDL_GL_SwapWindow`.
+- Al terminar se imprime:
+
+```text
+TRACE: summary assets=N textures=N draws=N
+```
+
+### 11.6 Input real y M7
+
+El código heredado de `android/platform.cpp` alimenta `AInputQueue`, pero este
+binario no importa `AInputQueue`, `ALooper`, `AKeyEvent` ni `AMotionEvent`.
+Enviar eventos ahí nunca podía controlar este juego.
+
+El binario sí exporta:
+
+```text
+Java_com_ea_blast_KeyboardAndroid_NativeOnKeyDown
+Java_com_ea_blast_KeyboardAndroid_NativeOnKeyUp
+Java_com_ea_blast_TouchSurfaceAndroid_NativeOnPointerEvent
+```
+
+`port/android/input_bridge.cpp` llama esos exports directamente, con firmas,
+keycodes, module IDs y geometría tomados del port de Vita:
+
+- botones/d-pad → `KeyboardAndroid` con module ID 600;
+- stick izquierdo → touchscreen virtual, module ID 1000;
+- stick derecho → touchpad virtual, module ID 1100.
+
+La función de pointer lleva dos `float`. El juego es softfp y el loader hardfp,
+por lo que el typedef usa `pcs("aapcs")`; sin eso el caller pondría las
+coordenadas en registros VFP y el juego leería basura desde registros core.
+
+Con `DEADSPACE_AUTOPILOT=1`, el bridge envía una secuencia variada después del
+warmup. Antes del swap muestrea una fila central y arma una firma perceptual de
+32 buckets RGB. Sólo cuenta una escena cuando hay un cambio visual grande
+dentro de la ventana posterior a una tecla; animación fuera de esa ventana no
+cuenta. El resumen es:
+
+```text
+TRACE: autopilot keys=N scenes=N
+```
+
+### 11.7 Empaquetado y dispositivo
+
+El scaffold PortMaster heredado pertenecía por error a otro juego: pedía el APK
+OUYA `net.mountainsheep.deadspace`, buscaba `libdeadspace.so` y describía hockey
+de Mountain Sheep. No podía iniciar este binario.
+
+ChatGPT/Codex reemplazó los artefactos bajo `port/ports/` para este juego:
+
+- el launcher recibe como argv el directorio extraído;
+- exige `assets/EAMCore.ini`, `assets/published/` y
+  `lib/armeabi/libEAMGameDeadSpace.so`;
+- valida SHA1 antes de aplicar parches por offset;
+- crea los alias EGL/GLES1/GLES2/libmali en `/tmp` para el blob 32-bit;
+- inicia gptokeyb sólo para el combo de salida;
+- documentación y metadata ahora dicen EA/IronMonkey, Xperia Play v1.1.33.
+
+La tarjeta del usuario es `/Volumes/ROMS`, corresponde a SD2 y se monta como
+`/roms2`; el launcher usa `/$directory/ports/deadspace`, por lo que sigue el
+valor que PortMaster entregue al cambiar entre SD1/SD2.
+
+### 11.8 Archivos modificados por ChatGPT/Codex
+
+```text
+port/android/fb_probe.cpp
+port/android/input_bridge.cpp
+port/android/input_bridge.h
+port/jni/classes/android_assets.cpp
+port/jni/jni.cpp
+port/ports/Dead Space.sh
+port/ports/deadspace/README.md
+port/ports/deadspace/deadspace.gptk
+port/ports/deadspace/gameinfo.xml
+port/ports/deadspace/port.json
+port/src/main.cpp
+port/src/patch.cpp
+port/src/symtab.cpp
+port/src/symtab_glprobe.cpp
+port/src/symtab_io.cpp
+```
+
+La zona congelada y `harness/verify.sh` permanecen intactos.

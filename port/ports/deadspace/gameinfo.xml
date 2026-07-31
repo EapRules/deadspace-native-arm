@@ -3,16 +3,11 @@
 	<game>
 		<path>./Dead Space.sh</path>
 		<name>Dead Space</name>
-		<desc>Arcade ice hockey by Mountain Sheep. One-on-one matches with a skater and a goalie a side, played for slapshots and body checks rather than for the rulebook.
-
-This port runs the game's original Android native library directly on Linux through a NativeActivity loader, so no emulator is involved. You supply your own APK - the OUYA build, which is the one made for a controller.
-
-Left stick skates, the face and shoulder buttons shoot and check.</desc>
-		<releasedate>20131008T000000</releasedate>
-		<developer>Mountain Sheep</developer>
-		<publisher>Mountain Sheep</publisher>
-		<genre>Sports</genre>
-		<players>1-2</players>
-		<image>./deadspace/cover.png</image>
+		<desc>The 2011 mobile survival-horror game. This port runs the original Android ARM library directly through a bionic/JNI compatibility loader. Supply your own extracted Xperia Play v1.1.33 game files.</desc>
+		<releasedate>20110125T000000</releasedate>
+		<developer>IronMonkey Studios</developer>
+		<publisher>Electronic Arts</publisher>
+		<genre>Action / Horror</genre>
+		<players>1</players>
 	</game>
 </gameList>
