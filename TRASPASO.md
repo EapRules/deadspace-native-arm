@@ -289,44 +289,6 @@ Corrida final del árbitro de solo lectura `port/harness/verify.sh`:
 [verify] === milestone reached: 7 / 7 ===
 ```
 
-### 11.11 Tercer ensayo: pantalla/input resueltos, render 3D roto
-
-Resultado informado por el usuario con la build `d4ca229` en la R36S:
-
-- la imagen ahora ocupa correctamente la pantalla y está centrada;
-- el cursor software aparece y la cruceta lo mueve;
-- A/Start permiten avanzar y los pads responden;
-- los menús y sus botones se ven;
-- el cursor actual es una cruz funcional pero visualmente provisoria, y puede
-  desaparecer al pasar entre cursor y controles de gameplay;
-- el contenido 3D está roto: fondos y objetos/personajes aparecen casi
-  completamente blancos, a veces sólo se distingue una línea, borde, sombra o
-  silueta;
-- el audio no funciona.
-
-Esto confirma en hardware real las dos correcciones del ensayo anterior:
-orientación natural 480x640 → viewport físico 640x480, y menús táctiles
-operables mediante cursor. También separa el próximo problema: ya no es
-geometría de ventana ni falta de input; es el camino de render de materiales,
-texturas, iluminación o estado GLES1 sobre Mali.
-
-La UI visible con el mundo 3D blanco acota la investigación. El proceso no
-está simplemente presentando un framebuffer vacío, y el motor sí carga assets,
-sube texturas y emite draws. Hay que comparar estado y errores GL entre qemu y
-el driver Mali real, especialmente formatos de textura/extensiones y las
-llamadas de fixed-function que afectan textura, color, iluminación, blending y
-matrices.
-
-El audio se deja deliberadamente para el final. Ya estaba documentada una
-divergencia ARM importante en ese bloque: el binario usa short vectors VFP que
-qemu emula y el Cortex-A35 de la R36S trata como RAZ/WI. No mezclar esa deuda
-con el fallo visual evita abrir dos frentes de bajo nivel a la vez.
-
-Para reducir las iteraciones físicas de copiar/expulsar/reinsertar la SD, el
-próximo paso es convertir el harness gráfico en una ejecución local
-interactiva y controlable, con capturas y logs automatizados, y exponer esas
-operaciones mediante un MCP específico del port.
-
 El harness no fue modificado. También se ejecutó un dry-run del launcher en un
 contenedor PortMaster descartable, quitando del sistema las bibliotecas que el
 paquete afirma transportar; pasó carga del módulo, resumen final, limpieza de
@@ -617,3 +579,94 @@ pasar M7/7:
 [verify] M7 ok
 [verify] === milestone reached: 7 / 7 ===
 ```
+
+### 11.11 Tercer ensayo: pantalla/input resueltos, render 3D roto
+
+Resultado informado por el usuario con la build `d4ca229` en la R36S:
+
+- la imagen ahora ocupa correctamente la pantalla y está centrada;
+- el cursor software aparece y la cruceta lo mueve;
+- A/Start permiten avanzar y los pads responden;
+- los menús y sus botones se ven;
+- el cursor actual es una cruz funcional pero visualmente provisoria, y puede
+  desaparecer al pasar entre cursor y controles de gameplay;
+- el contenido 3D está roto: fondos y objetos/personajes aparecen casi
+  completamente blancos, a veces sólo se distingue una línea, borde, sombra o
+  silueta;
+- el audio no funciona.
+
+Esto confirma en hardware real las dos correcciones del ensayo anterior:
+orientación natural 480x640 → viewport físico 640x480, y menús táctiles
+operables mediante cursor. También separa el próximo problema: ya no es
+geometría de ventana ni falta de input; es el camino de render de materiales,
+texturas, iluminación o estado GLES1 sobre Mali.
+
+La UI visible con el mundo 3D blanco acota la investigación. El proceso no
+está simplemente presentando un framebuffer vacío, y el motor sí carga assets,
+sube texturas y emite draws. Hay que comparar estado y errores GL entre qemu y
+el driver Mali real, especialmente formatos de textura/extensiones y las
+llamadas de fixed-function que afectan textura, color, iluminación, blending y
+matrices.
+
+El audio se deja deliberadamente para el final. Ya estaba documentada una
+divergencia ARM importante en ese bloque: el binario usa short vectors VFP que
+qemu emula y el Cortex-A35 de la R36S trata como RAZ/WI. No mezclar esa deuda
+con el fallo visual evita abrir dos frentes de bajo nivel a la vez.
+
+### 11.12 Emulador interactivo y MCP local
+
+Se agregó un camino de desarrollo separado del árbitro:
+`port/harness/verify.sh` permanece inmutable y sigue calificando M1-M7; el
+nuevo `port/emulator/` mantiene qemu-arm + Mesa vivo para inspección y control.
+
+Componentes:
+
+- `android/emulator_control.cpp/.h`: canal opcional activado únicamente por
+  `DEADSPACE_CONTROL_DIR`;
+- `emulator/run.sh`: construye/inicia qemu con un directorio compartido;
+- `emulator/send.sh`: cliente manual validado;
+- `emulator/mcp_server.py`: servidor MCP stdio sin dependencias externas;
+- `emulator/smoke_test_mcp.py`: prueba integral real;
+- `emulator/README.md`: protocolo y uso.
+
+El canal es append-only. El host escribe una línea en `commands` y el loader
+consume como máximo una por frame. Soporta posición absoluta de cursor,
+down/up táctil, botones, captura y salida. Consumir una sola línea por frame
+impide que un click down/up se colapse en un evento de duración cero.
+
+Las capturas no son screenshots sintéticos del host: el loader lee el default
+framebuffer actual mediante `glReadPixels`, lo invierte verticalmente y escribe
+un PNG RGBA válido con zlib. Estado, frame y ruta de la captura vuelven por
+`status.json`.
+
+El MCP publica ocho herramientas:
+
+```text
+start_emulator
+stop_emulator
+emulator_status
+move_cursor
+click
+press_control
+capture_screen
+read_emulator_log
+```
+
+La prueba integral ejecutó `initialize` → start/rebuild → captura PNG 640x480
+→ stop y terminó con:
+
+```text
+MCP smoke test PASS: initialize, start, PNG capture, stop
+```
+
+Lo más importante es que la captura local tardía reprodujo exactamente el
+reporte de la R36S: título y botones de menú correctos, fondo/modelo 3D blanco
+con apenas bordes y sombras. Por lo tanto el defecto visual ya se puede
+investigar sin copiar ni expulsar la SD en cada iteración.
+
+La misma prueba encontró un bug aislado del cursor. `symtable_gles1` contiene
+thunks softfp para llamadas que vienen del juego. El overlay host hardfp estaba
+llamando `glClearColor(float...)` a través de uno de esos thunks, perdiendo tres
+argumentos y produciendo la cruz roja observada en la primera captura. El
+cursor y el capturador ahora resuelven punteros crudos con
+`SDL_GL_GetProcAddress`; una captura posterior muestra la cruz blanca.

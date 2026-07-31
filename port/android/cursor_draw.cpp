@@ -10,22 +10,23 @@
 #include <algorithm>
 #include <string.h>
 
+#include <SDL2/SDL.h>
+
 #include "khronos/glad.h"
-#include "so_util.h"
 #include "trace.h"
 
 #include "cursor_draw.h"
 #include "input_bridge.h"
 
-extern DynLibFunction symtable_gles1[];
-
 static uintptr_t find_gles1_function(const char *name)
 {
-    for (int i = 0; symtable_gles1[i].symbol; i++) {
-        if (strcmp(symtable_gles1[i].symbol, name) == 0)
-            return symtable_gles1[i].func;
-    }
-    return 0;
+    /*
+     * This is host armhf code, so it must call the raw driver pointer. The
+     * entries in symtable_gles1 are softfp thunks built for the armeabi game;
+     * calling glClearColor through one from hardfp host code loses three float
+     * arguments and produced the red cross seen in the first local capture.
+     */
+    return (uintptr_t)SDL_GL_GetProcAddress(name);
 }
 
 struct CursorGl {

@@ -53,6 +53,7 @@
 
 #include "crash.h"
 #include "cursor_draw.h"
+#include "emulator_control.h"
 #include "fb_probe.h"
 #include "fix_path.h"
 #include "input_bridge.h"
@@ -462,6 +463,7 @@ int main(int argc, char **argv)
     }
 
     android_input_init(mod, env, kWidth, kHeight);
+    emulator_control_init();
 
     /*
      * A bounded run. DEADSPACE_FRAME_LIMIT stops the process after that many
@@ -479,6 +481,8 @@ int main(int argc, char **argv)
                 goto done;
         }
 
+        if (!emulator_control_tick(frames))
+            goto done;
         android_input_tick();
         android_input_autopilot_tick(frames);
 
@@ -505,6 +509,7 @@ int main(int argc, char **argv)
             android_fb_probe(frames, w, h);
             android_input_autopilot_sample(frames);
             android_cursor_draw(w, h);
+            emulator_control_after_draw(frames, w, h);
             SDL_GL_SwapWindow(window);
         }
 
@@ -519,6 +524,7 @@ int main(int argc, char **argv)
     }
 
 done:
+    emulator_control_shutdown(frames);
     trace("frames=%ld", frames);
     trace("summary assets=%ld textures=%ld draws=%ld",
           android_io_assets_opened(), android_gl_textures_uploaded(),

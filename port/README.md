@@ -133,6 +133,17 @@ The `d4ca229` build was tested on an R36S with its Mali-G31 driver:
 The next graphics milestone is therefore correct GLES1 material/texturing on
 Mali, not window geometry or input. Audio remains intentionally deferred.
 
+## Interactive local emulator
+
+`emulator/run.sh` keeps the qemu-arm + Mesa build alive and exposes cursor,
+touch, controls, screenshots and logs through a shared control directory.
+`emulator/mcp_server.py` publishes the same operations as an MCP server for
+Claude Code. See `emulator/README.md`.
+
+This path already reproduces the real-device graphics failure locally: menu
+UI renders correctly while the 3D background/model is mostly white with only
+edges and shadows. The immutable M1-M7 harness remains separate and unchanged.
+
 ## Diagnostics
 
 Every device launch writes `ports/deadspace/log.txt`. Important lines:

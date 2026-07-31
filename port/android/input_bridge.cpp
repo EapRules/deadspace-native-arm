@@ -227,6 +227,46 @@ extern "C" void android_input_cursor_position(float *x, float *y, int *visible)
         *visible = g_cursor_visible ? 1 : 0;
 }
 
+void android_input_cursor_set(float x, float y)
+{
+    cursor_show();
+    g_cursor_x = std::max(0.0f, std::min(x, (float)g_width - 1.0f));
+    g_cursor_y = std::max(0.0f, std::min(y, (float)g_height - 1.0f));
+}
+
+void android_input_cursor_press(bool down)
+{
+    cursor_tap(down);
+}
+
+bool android_input_inject_control(const char *name, bool down)
+{
+    if (!name)
+        return false;
+
+    Uint8 button;
+    if (!strcasecmp(name, "a"))             button = g_accept_button;
+    else if (!strcasecmp(name, "b"))        button = g_back_button;
+    else if (!strcasecmp(name, "x"))        button = SDL_CONTROLLER_BUTTON_X;
+    else if (!strcasecmp(name, "y"))        button = SDL_CONTROLLER_BUTTON_Y;
+    else if (!strcasecmp(name, "l1"))       button = SDL_CONTROLLER_BUTTON_LEFTSHOULDER;
+    else if (!strcasecmp(name, "r1"))       button = SDL_CONTROLLER_BUTTON_RIGHTSHOULDER;
+    else if (!strcasecmp(name, "start"))    button = SDL_CONTROLLER_BUTTON_START;
+    else if (!strcasecmp(name, "select"))   button = SDL_CONTROLLER_BUTTON_BACK;
+    else if (!strcasecmp(name, "l3"))       button = SDL_CONTROLLER_BUTTON_LEFTSTICK;
+    else if (!strcasecmp(name, "r3"))       button = SDL_CONTROLLER_BUTTON_RIGHTSTICK;
+    else if (!strcasecmp(name, "up"))       button = SDL_CONTROLLER_BUTTON_DPAD_UP;
+    else if (!strcasecmp(name, "down"))     button = SDL_CONTROLLER_BUTTON_DPAD_DOWN;
+    else if (!strcasecmp(name, "left"))     button = SDL_CONTROLLER_BUTTON_DPAD_LEFT;
+    else if (!strcasecmp(name, "right"))    button = SDL_CONTROLLER_BUTTON_DPAD_RIGHT;
+    else return false;
+
+    SDL_Event event = {};
+    event.type = down ? SDL_CONTROLLERBUTTONDOWN : SDL_CONTROLLERBUTTONUP;
+    event.cbutton.button = button;
+    return android_input_event(&event);
+}
+
 static void update_sticks(void)
 {
     if (!g_pointer)
