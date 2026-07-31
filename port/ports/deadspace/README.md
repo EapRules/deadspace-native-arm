@@ -98,6 +98,11 @@ A harmless “No internet connection” message may appear after installation
 while PortMaster refreshes its own catalogue. The port and its screenshot are
 already inside the ZIP.
 
+On ArkOS/dArkOS, the launcher also refreshes the firmware's normalized
+`ports/images/Dead Space.png` from the canonical `deadspace/cover.png` when an
+older direct installation left an APK icon there. Restart EmulationStation (or
+reboot once) after the first updated launch to clear its in-memory artwork.
+
 ## Controls
 
 The original menus are touch-only. The port supplies a software pointer and

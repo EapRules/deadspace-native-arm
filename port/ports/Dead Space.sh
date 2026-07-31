@@ -42,6 +42,23 @@ cd "$GAMEDIR" || exit 1
 : > "$GAMEDIR/log.txt"
 exec > "$GAMEDIR/log.txt" 2>&1
 
+# PortMaster's portable metadata points at deadspace/cover.png, which is the
+# canonical source shipped in the release. ArkOS/dArkOS additionally keeps a
+# normalized EmulationStation copy beside the other port artwork. A direct
+# update does not rerun PortMaster's metadata importer, so that copy can remain
+# an old APK icon indefinitely. Refresh only Dead Space's own image when its
+# bytes differ; never rewrite gamelist.xml or touch another port's metadata.
+ES_PORT_IMAGE="/$directory/ports/images/Dead Space.png"
+if [ -f "$GAMEDIR/cover.png" ] && \
+   { [ ! -f "$ES_PORT_IMAGE" ] || ! cmp -s "$GAMEDIR/cover.png" "$ES_PORT_IMAGE"; }; then
+  mkdir -p "$(dirname "$ES_PORT_IMAGE")"
+  if cp -f "$GAMEDIR/cover.png" "$ES_PORT_IMAGE"; then
+    echo "Port artwork normalized at $ES_PORT_IMAGE (visible after frontend restart)"
+  else
+    echo "Warning: could not refresh $ES_PORT_IMAGE; continuing without artwork update"
+  fi
+fi
+
 export LD_LIBRARY_PATH="$GAMEDIR/libs.armhf${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 export DEADSPACE_FACE_LAYOUT="${DEADSPACE_FACE_LAYOUT:-nintendo}"

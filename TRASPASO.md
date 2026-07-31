@@ -1040,8 +1040,8 @@ Artefacto independiente final, libre de contenido de EA:
 
 ```text
 port/build/deadspace.zip
-size   8016341 bytes
-SHA256 5cda0a656d0cf63b872b0c4b829c52e7afd06b3af77468c9a94d0c9d3732a17c
+size   8016847 bytes
+SHA256 784a9348b8a99638ab55323c01c8dae88de3309acd9699b9399a255c92f52eb5
 ```
 
 La última corrida del verificador inmutable posterior al empaquetado alcanzó
@@ -1119,3 +1119,39 @@ size   7215740 bytes
 
 Se eliminaron exclusivamente los AppleDouble `._*` creados por macOS durante
 la copia antes de sincronizar y expulsar el volumen.
+
+### 11.18 Portada normalizada de EmulationStation
+
+La prueba posterior en consola mostró que el juego seguía usando un icono viejo
+del APK en la lista de Ports aunque el release ya llevaba la composición 4:3
+aportada por EapRules. La portada canónica estaba bien ubicada y el
+`gameinfo.xml` ya seguía el formato oficial de PortMaster:
+
+```xml
+<image>./deadspace/cover.png</image>
+```
+
+La causa era específica del estado existente de ArkOS/dArkOS: EmulationStation
+tenía normalizada otra copia en `ports/images/Dead Space.png` y el update
+directo por ZIP no volvió a ejecutar el importador de metadata de PortMaster.
+Por eso reemplazar `deadspace/cover.png` no cambiaba lo que el frontend tenía
+referenciado y cacheado.
+
+El launcher ahora compara ambas copias en cada inicio y, sólo si difieren,
+actualiza `ports/images/Dead Space.png` desde la portada canónica. No parsea ni
+reescribe `gamelist.xml`, no toca imágenes de otros ports y por lo tanto no
+arriesga favoritos, `playcount` ni `lastplayed`. EmulationStation puede mantener
+la textura vieja en RAM hasta reiniciar el frontend o la consola.
+
+El dry-run integral se amplió para instalar `cover.png` y exigir igualdad byte
+por byte con la copia normalizada. Volvió a pasar con 176 bibliotecas armhf del
+sistema apartadas, importación eapx real, arranque del juego y salida limpia:
+
+```text
+[dryrun] ok:   ArkOS artwork normalized from canonical cover
+[dryrun] === PASS ===
+```
+
+Este arreglo está empaquetado pero todavía no se copió a la SD: el volumen fue
+expulsado correctamente al cerrar 11.17 y debe volver a insertarse para aplicar
+el launcher actualizado y reemplazar de inmediato la copia global vieja.

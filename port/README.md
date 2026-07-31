@@ -124,7 +124,10 @@ ports/
 ```
 
 The launcher follows PortMaster's `directory` variable, so it works from
-either `/roms` or `/roms2`.
+either `/roms` or `/roms2`. It also refreshes only Dead Space's normalized
+ArkOS artwork at `ports/images/Dead Space.png` when a direct update left an old
+APK icon cached there; the canonical portable cover remains
+`deadspace/cover.png` as required by PortMaster's `gameinfo.xml` format.
 
 ## Controls
 
