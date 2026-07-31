@@ -188,25 +188,6 @@ static bool extension_present(const char *extensions, const char *wanted)
     return false;
 }
 
-static bool driver_supports_pvrtc(void)
-{
-    static int supported = -1;
-    if (supported >= 0)
-        return supported != 0;
-
-    using GetString = const GLubyte *(*)(GLenum);
-    GetString get_string =
-        (GetString)SDL_GL_GetProcAddress("glGetString");
-    const char *extensions = get_string
-        ? (const char *)get_string(GL_EXTENSIONS) : NULL;
-    supported = extension_present(
-        extensions, "GL_IMG_texture_compression_pvrtc") ? 1 : 0;
-    trace("PVRTC: native driver support %s; software fallback %s",
-          supported ? "present" : "absent",
-          supported ? "disabled" : "enabled");
-    return supported != 0;
-}
-
 static bool driver_supports_atc(void)
 {
     static int supported = -1;
@@ -384,7 +365,11 @@ extern "C" void probe_glCompressedTexImage2D(
     bool known_pvrtc = false, ignored_two_bpp = false, ignored_opaque = false;
     known_pvrtc = pvrtc_format(internalformat, &ignored_two_bpp,
                               &ignored_opaque);
-    if (known_pvrtc && !driver_supports_pvrtc() && upload) {
+    /* Some Mali firmware advertises PVRTC but produces black textures when
+     * the compressed upload is accepted.  Decode PVRTC unconditionally so
+     * the Full donor is deterministic on both advertised and unsupported
+     * drivers. */
+    if (known_pvrtc && upload) {
         std::vector<unsigned char> rgba;
         if (decode_pvrtc(internalformat, width, height, image_size, data,
                          &rgba)) {
