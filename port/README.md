@@ -16,20 +16,22 @@ scaffold that used to occupy some of this repository.
 
 ## Current status
 
-The immutable harness reaches **M7/7** under qemu-arm + llvmpipe:
+The immutable harness reaches **M7/7** under qemu-arm + llvmpipe. The latest
+PVRTC-fallback run reported:
 
 ```text
-600 frames
+570 frames
 84 successful content opens
-11 texture uploads
-more than 35,000 draw calls
+151 texture uploads
+35,049 draw calls
 non-black framebuffer
-12 synthetic JNI keys
-2 measured scene changes
+11 synthetic JNI keys
+3 measured scene changes
 ```
 
 That proves startup, content loading, rendering and input-driven progression in
-the harness. R36S/Mali, audio, saves and a complete play-through still require
+the harness. The corrected graphics candidate is on the R36S SD and awaits
+device confirmation. Audio, saves and a complete play-through still require
 device testing.
 
 The full investigation history and explicit split between Claude's work and
@@ -119,7 +121,7 @@ either analog stick dismisses it so the same controls can drive gameplay.
 The pointer callback uses base AAPCS because the game is softfp and the loader
 is hardfp.
 
-## Real-device status
+## Graphics and real-device status
 
 The `d4ca229` build was tested on an R36S with its Mali-G31 driver:
 
@@ -130,8 +132,18 @@ The `d4ca229` build was tested on an R36S with its Mali-G31 driver:
   only an edge, shadow or silhouette visible;
 - audio is not working yet.
 
-The next graphics milestone is therefore correct GLES1 material/texturing on
-Mali, not window geometry or input. Audio remains intentionally deferred.
+The interactive emulator reproduced that exact visual failure. Per-call GL
+diagnostics identified rejected `glCompressedTexImage2D` uploads:
+`0x8c00/0x8c02` are PVRTC1 4bpp RGB/RGBA, formats unsupported by both llvmpipe
+and Mali-G31. The loader now uses Imagination's MIT-licensed decoder and
+uploads RGBA8888 when the driver does not advertise native PVRTC.
+
+A subsequent local capture renders the complete menu environment with its
+textures, lighting and materials, and the immutable harness remains M7/7. The
+candidate with SHA-256
+`9199544a9db9113e20facac61fb518dfc892beff35f17156ff3e313924a015da`
+is installed on the SD for hardware confirmation. Audio remains intentionally
+deferred.
 
 ## Interactive local emulator
 
@@ -140,9 +152,10 @@ touch, controls, screenshots and logs through a shared control directory.
 `emulator/mcp_server.py` publishes the same operations as an MCP server for
 Claude Code. See `emulator/README.md`.
 
-This path already reproduces the real-device graphics failure locally: menu
-UI renders correctly while the 3D background/model is mostly white with only
-edges and shadows. The immutable M1-M7 harness remains separate and unchanged.
+This path reproduced the real-device graphics failure locally and then
+verified the PVRTC software fallback visually: the same menu now has a fully
+textured 3D environment. The immutable M1-M7 harness remains separate and
+unchanged.
 
 ## Diagnostics
 

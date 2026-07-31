@@ -1,9 +1,12 @@
 # Dead Space — traspaso técnico
 
 Estado actual (actualización ChatGPT/Codex, 2026-07-30): **M7 de 7**. El
-verificador inmutable completa 600 frames, carga contenido, sube texturas,
-dibuja una imagen no negra y demuestra dos cambios de escena después de input
-JNI sintético.
+verificador inmutable completó 570 frames en la última corrida, cargó
+contenido, procesó 151 uploads de textura, dibujó una imagen no negra y
+demostró tres cambios de escena después de input JNI sintético. El render 3D
+blanco fue atribuido a PVRTC no soportado, corregido y verificado visualmente
+en el emulador local; la build candidata está en la SD pendiente de
+confirmación sobre Mali-G31.
 
 Este documento es para que otro agente continúe sin repetir nada. Lo que está en
 `HALLAZGOS.md` es el triage del juego; esto es el estado de la investigación.
@@ -670,3 +673,83 @@ llamando `glClearColor(float...)` a través de uno de esos thunks, perdiendo tre
 argumentos y produciendo la cruz roja observada en la primera captura. El
 cursor y el capturador ahora resuelven punteros crudos con
 `SDL_GL_GetProcAddress`; una captura posterior muestra la cruz blanca.
+
+### 11.13 Causa y corrección del mundo 3D blanco
+
+El emulador local permitió reproducir exactamente el defecto visto en la
+R36S. La primera versión del probe sólo podía decir que al llegar a
+`glReadPixels` ya había un error GL pendiente. Para atribuirlo se agregó un
+modo opt-in, `DEADSPACE_GL_DIAG=1`, que hace pasar todas las entradas GLES por
+su thunk tipado y drena `glGetError` inmediatamente antes y después de cada
+llamada. No se activa durante una ejecución normal.
+
+El resultado fue inequívoco:
+
+```text
+GLDIAG: produced by glCompressedTexImage2D: 0x0500
+```
+
+`0x0500` es `GL_INVALID_ENUM`. Los argumentos mostraron cadenas completas de
+mipmaps con estos dos formatos:
+
+```text
+0x8c00 = GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG
+0x8c02 = GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG
+```
+
+Por ejemplo, el primer material intenta subir una textura RGBA PVRTC1 de
+1024x1024 y 524288 bytes, seguida por sus niveles hasta 1x1. PVRTC es el
+formato propietario de PowerVR para el que fueron preparados los assets de
+este port del juego. llvmpipe/Mesa no lo acepta y la Mali-G31 tampoco; por eso
+la UI podía dibujarse mientras las texturas del mundo 3D eran rechazadas y los
+modelos quedaban blancos con sólo geometría, bordes y sombras.
+
+La corrección intercepta `glCompressedTexImage2D`:
+
+- si el driver anuncia `GL_IMG_texture_compression_pvrtc`, conserva el upload
+  comprimido nativo;
+- si no lo anuncia, decodifica PVRTC1 RGB/RGBA de 2 o 4 bpp a RGBA8888 y lo
+  sube mediante `glTexImage2D`;
+- para el formato RGB fuerza alpha 255;
+- valida el tamaño comprimido mínimo y los desbordes antes de reservar memoria.
+
+El decoder se vendorizó sin modificaciones desde el SDK oficial PowerVR de
+Imagination Technologies, commit
+`2b1bf2f14d3365d0bb801e2a6a131a319d3a2e48`, con su licencia MIT en
+`port/third_party/powervr/`.
+
+La captura local posterior muestra el menú completo: pasillo, tuberías,
+pantallas, luces, transparencias y materiales correctos. Ya no aparece el
+fondo blanco. El framebuffer probe tampoco reporta el sufijo de error GL
+pendiente.
+
+El harness inmutable volvió a pasar:
+
+```text
+[verify] M5 ok (570 frames)
+[verify] M6 counters: assets=84 textures=151 draws=35049 nonblack=1
+[verify] M6 ok (assets=84 textures=151 draws=35049, survived)
+[verify] M7 autopilot: injected 11 keys over 570 frames, scene changed 3 time(s)
+[verify] M7 ok
+[verify] === milestone reached: 7 / 7 ===
+```
+
+El aumento de 11 a 151 uploads no es una regresión: antes el contador sólo
+veía `glTexImage2D`; ahora también cuenta los niveles PVRTC que atraviesan el
+fallback.
+
+La build candidata fue copiada y sincronizada en:
+
+```text
+/Volumes/ROMS/ports/deadspace/deadspace
+SHA256 9199544a9db9113e20facac61fb518dfc892beff35f17156ff3e313924a015da
+7160896 bytes
+```
+
+También se actualizó el README instalado, se eliminó únicamente el archivo de
+metadatos AppleDouble `._deadspace` creado por macOS y el volumen
+`/Volumes/ROMS` fue expulsado correctamente con `diskutil eject`.
+
+Estado: render correcto confirmado en la reproducción local y M7/7; falta que
+el usuario confirme esta build sobre la Mali-G31 real. Audio continúa
+deliberadamente postergado.

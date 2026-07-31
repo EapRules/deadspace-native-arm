@@ -1,5 +1,6 @@
 #pragma once
 #include "so_util.h"
+#include "gl_diag.h"
 #include "thunk_gen.h"
 template<typename D, typename R, typename... Args>
 struct ThunkFloatImplPtr;
@@ -31,20 +32,35 @@ struct ThunkFloatPtr : ThunkFloatImplPtr<ThunkFloatPtr<Def, PFN>, PFN>
 {
 public:
     static inline PFN func;
+    static inline const char *symname = NULL;
 #if defined(TRACE_GL)
-    static inline char* symname = NULL;
+    static inline char *trace_symname = NULL;
 #endif
     template<typename... Args>
     static auto bridge_impl(Args... args)
     {
 #if defined(TRACE_GL)
-        if (symname) {
-            std::cout << symname << "(";
+        if (trace_symname) {
+            std::cout << trace_symname << "(";
             ((std::cout << args << ", "), ...);
             std::cout << ")\n";
         }
 #endif
-        return func(args...);
+        const bool diagnose = gl_diag_enabled();
+        if (diagnose)
+            gl_diag_before(symname);
+
+        using Result = std::invoke_result_t<PFN, Args...>;
+        if constexpr (std::is_void_v<Result>) {
+            func(args...);
+            if (diagnose)
+                gl_diag_after(symname);
+        } else {
+            Result result = func(args...);
+            if (diagnose)
+                gl_diag_after(symname);
+            return result;
+        }
     }
 };
 
@@ -54,14 +70,23 @@ template <auto F, class T = ThunkFloatPtr<F, std::remove_pointer_t<decltype(F)>>
 uintptr_t select_either_ptr(void *fn, const char *symname)
 {
     T::func = (decltype(T::func))fn;
+    T::symname = symname;
     
 #if defined(TRACE_GL)
     // Always thunk when tracing GL - so we can trace gl calls
     if (strcmp(symname, "gl") == 0 || strcmp(symname, "egl") == 0) {
-        T::symname = strdup(symname);
+        T::trace_symname = strdup(symname);
         return (uintptr_t)T::bridge;
     }
 #endif
+
+    /*
+     * Diagnostic mode deliberately intercepts every call so the GL error can
+     * be attributed to the operation that produced it. glGetError itself must
+     * remain raw: wrapping it would consume the value before the game sees it.
+     */
+    if (gl_diag_enabled() && strcmp(symname, "glGetError") != 0)
+        return (uintptr_t)T::bridge;
 
     // When we have ABI_ATTR, we will thunk these so that they are called in the
     // correct ABI.

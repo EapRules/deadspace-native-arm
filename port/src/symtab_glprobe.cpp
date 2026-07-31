@@ -25,9 +25,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <atomic>
+#include <algorithm>
+#include <new>
+#include <vector>
+
+#include <SDL2/SDL.h>
 
 #include "khronos/glad.h"
+#include "third_party/powervr/PVRTDecompress.h"
 
+#include "gl_diag.h"
 #include "so_util.h"
 #include "thunk_gen.h"
 #include "trace.h"
@@ -164,6 +171,155 @@ extern "C" void probe_glTexImage2D(GLenum target, GLint level,
                format, type, pixels);
 }
 
+static bool extension_present(const char *extensions, const char *wanted)
+{
+    if (!extensions || !wanted || !*wanted)
+        return false;
+    size_t length = strlen(wanted);
+    const char *at = extensions;
+    while ((at = strstr(at, wanted)) != NULL) {
+        bool left = at == extensions || at[-1] == ' ';
+        bool right = at[length] == '\0' || at[length] == ' ';
+        if (left && right)
+            return true;
+        at += length;
+    }
+    return false;
+}
+
+static bool driver_supports_pvrtc(void)
+{
+    static int supported = -1;
+    if (supported >= 0)
+        return supported != 0;
+
+    using GetString = const GLubyte *(*)(GLenum);
+    GetString get_string =
+        (GetString)SDL_GL_GetProcAddress("glGetString");
+    const char *extensions = get_string
+        ? (const char *)get_string(GL_EXTENSIONS) : NULL;
+    supported = extension_present(
+        extensions, "GL_IMG_texture_compression_pvrtc") ? 1 : 0;
+    trace("PVRTC: native driver support %s; software fallback %s",
+          supported ? "present" : "absent",
+          supported ? "disabled" : "enabled");
+    return supported != 0;
+}
+
+static bool pvrtc_format(GLenum format, bool *two_bpp, bool *opaque)
+{
+    switch (format) {
+    case GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG:
+        *two_bpp = false; *opaque = true;  return true;
+    case GL_COMPRESSED_RGB_PVRTC_2BPPV1_IMG:
+        *two_bpp = true;  *opaque = true;  return true;
+    case GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG:
+        *two_bpp = false; *opaque = false; return true;
+    case GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG:
+        *two_bpp = true;  *opaque = false; return true;
+    default:
+        return false;
+    }
+}
+
+static bool decode_pvrtc(GLenum format, GLsizei width, GLsizei height,
+                         GLsizei image_size, const void *data,
+                         std::vector<unsigned char> *rgba)
+{
+    bool two_bpp = false, opaque = false;
+    if (!pvrtc_format(format, &two_bpp, &opaque) ||
+        width <= 0 || height <= 0 || image_size < 0 || !data)
+        return false;
+
+    uint64_t stored_width = std::max<uint64_t>(
+        (uint64_t)width, two_bpp ? 16u : 8u);
+    uint64_t stored_height = std::max<uint64_t>((uint64_t)height, 8u);
+    uint64_t expected = stored_width * stored_height *
+                        (two_bpp ? 2u : 4u) / 8u;
+    uint64_t decoded_size = (uint64_t)width * (uint64_t)height * 4u;
+    if (expected > (uint64_t)image_size ||
+        decoded_size > (uint64_t)SIZE_MAX)
+        return false;
+
+    try {
+        rgba->resize((size_t)decoded_size);
+        pvr::PVRTDecompressPVRTC(data, two_bpp ? 1u : 0u,
+                                (uint32_t)width, (uint32_t)height,
+                                rgba->data());
+    } catch (const std::bad_alloc &) {
+        trace("PVRTC: cannot allocate %llu-byte decode buffer",
+              (unsigned long long)decoded_size);
+        return false;
+    }
+
+    if (opaque) {
+        for (size_t i = 3; i < rgba->size(); i += 4)
+            (*rgba)[i] = 255;
+    }
+    return true;
+}
+
+extern "C" void probe_glCompressedTexImage2D(
+    GLenum target, GLint level, GLenum internalformat, GLsizei width,
+    GLsizei height, GLint border, GLsizei image_size, const void *data)
+{
+    using CompressedUpload =
+        void (*)(GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei,
+                 const void *);
+    using Upload =
+        void (*)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum,
+                 GLenum, const void *);
+    static CompressedUpload compressed_upload =
+        (CompressedUpload)SDL_GL_GetProcAddress("glCompressedTexImage2D");
+    static Upload upload =
+        (Upload)SDL_GL_GetProcAddress("glTexImage2D");
+    static int diagnostic_lines = 0;
+    static int fallback_lines = 0;
+    g_textures++;
+
+    if (gl_diag_enabled()) {
+        gl_diag_before("glCompressedTexImage2D");
+        if (diagnostic_lines++ < 64) {
+            trace("GLDIAG: compressed upload target=0x%04x level=%d "
+                  "format=0x%04x size=%dx%d border=%d bytes=%d data=%p",
+                  target, level, internalformat, width, height, border,
+                  image_size, data);
+        }
+    }
+
+    bool known_pvrtc = false, ignored_two_bpp = false, ignored_opaque = false;
+    known_pvrtc = pvrtc_format(internalformat, &ignored_two_bpp,
+                              &ignored_opaque);
+    if (known_pvrtc && !driver_supports_pvrtc() && upload) {
+        std::vector<unsigned char> rgba;
+        if (decode_pvrtc(internalformat, width, height, image_size, data,
+                         &rgba)) {
+            upload(target, level, GL_RGBA, width, height, border,
+                   GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+            if (fallback_lines++ < 16) {
+                trace("PVRTC: decoded level=%d format=0x%04x %dx%d "
+                      "(%d compressed bytes -> %zu RGBA bytes)",
+                      level, internalformat, width, height, image_size,
+                      rgba.size());
+            }
+            if (gl_diag_enabled())
+                gl_diag_after("PVRTC fallback glTexImage2D");
+            return;
+        }
+        trace("PVRTC: invalid upload; forwarding to driver for GL error "
+              "(level=%d format=0x%04x %dx%d bytes=%d)",
+              level, internalformat, width, height, image_size);
+    }
+
+    if (compressed_upload) {
+        compressed_upload(target, level, internalformat, width, height,
+                          border, image_size, data);
+    }
+
+    if (gl_diag_enabled())
+        gl_diag_after("glCompressedTexImage2D");
+}
+
 /*
  * Geometry diagnostics for real devices.
  *
@@ -232,6 +388,8 @@ DynLibFunction symtable_glprobe[] = {
     THUNK_SPECIFIC("glDrawArrays",    probe_glDrawArrays),
     THUNK_SPECIFIC("glDrawElements",  probe_glDrawElements),
     THUNK_SPECIFIC("glTexImage2D",    probe_glTexImage2D),
+    THUNK_SPECIFIC("glCompressedTexImage2D",
+                   probe_glCompressedTexImage2D),
     THUNK_SPECIFIC("glViewport",      probe_glViewport),
     THUNK_SPECIFIC("glScissor",       probe_glScissor),
     { NULL, 0 },

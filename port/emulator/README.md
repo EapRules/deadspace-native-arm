@@ -37,6 +37,17 @@ both lines immediately.
 MCP server uses this protocol; it does not need keyboard focus, X11, VNC or a
 physical controller.
 
+For per-call GLES error attribution:
+
+```bash
+DEADSPACE_GL_DIAG=1 ./emulator/run.sh
+```
+
+Diagnostic mode routes every typed GLES entry through an observation hook and
+checks `glGetError` immediately around the real driver call. It is opt-in
+because reading the error queue is observable to the game. This mode identified
+the rejected PVRTC uploads that caused the white 3D scene.
+
 ## MCP tools
 
 `mcp_server.py` is a dependency-free stdio MCP server. It exposes:

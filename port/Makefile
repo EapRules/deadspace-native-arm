@@ -32,7 +32,8 @@ CXXFLAGS := -std=gnu++20 $(OPT) $(WARN) -fno-strict-aliasing -fuse-cxa-atexit
 LDFLAGS  := $(OPT)
 LDLIBS   := $(shell $(PKG_CONFIG) --libs $(PKGS)) -pthread -lm -ldl -lrt -lbsd
 
-SRCDIRS := src android loader thunks/libc thunks/khronos jni jni/classes
+SRCDIRS := src android loader thunks/libc thunks/khronos jni jni/classes \
+           third_party/powervr
 SRCS    := $(foreach d,$(SRCDIRS),$(wildcard $(d)/*.cpp))
 OBJS    := $(patsubst %.cpp,$(OBJDIR)/%.cpp.o,$(SRCS))
 DEPS    := $(OBJS:.o=.d)

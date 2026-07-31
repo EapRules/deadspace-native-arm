@@ -15,6 +15,7 @@ the licences differ and the originals must keep their attribution.
 | `jni/jni.h` | The Android Open Source Project | Apache-2.0 |
 | `loader/leb128.h` | Free Software Foundation (binutils) | GPL |
 | `thunks/khronos/` | glad generator, Khronos headers | MIT / Apache-2.0 |
+| `third_party/powervr/PVRTDecompress.*` | [PowerVR SDK](https://github.com/powervr-graphics/Native_SDK) by Imagination Technologies | MIT |
 | `android/`, `jni/classes/xt_*`, `src/`, `harness/`, `ports/` | written for this port | GPL-3.0 |
 
 ## Note on the GPL version
@@ -35,12 +36,12 @@ repository will relicense to match — open an issue and it will be corrected.
 ## What is *not* in here
 
 No game code, assets, or data from Dead Space are distributed by this project.
-The game is Mountain Sheep's; you supply your own APK. The port loads it at
-runtime and circumvents no protection.
+The supported binary is EA/Visceral's Xperia Play release; you supply your own
+copy. The port loads it at runtime and circumvents no protection.
 
 The cover image and the optional 4:3 splash under `ports/deadspace/` are
-promotional artwork belonging to **Mountain Sheep**, included only to identify
-the game in the PortMaster menu the way every other PortMaster entry does. They
-are not game content and are not required for the port to run — delete them and
-it still works. If Mountain Sheep would rather they were not distributed, open
-an issue and they come out.
+promotional artwork belonging to their respective rights holders, included
+only to identify the game in the PortMaster menu the way every other PortMaster
+entry does. They are not game content and are not required for the port to run
+— delete them and it still works. If a rights holder would rather they were not
+distributed, open an issue and they come out.

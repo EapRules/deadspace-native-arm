@@ -9,17 +9,18 @@ that an early scaffold in this repository described.
 
 The immutable headless verifier reaches **M7/7**:
 
-- 600 frames without a crash;
+- 570 frames without a crash in the latest run;
 - 84 successful content opens;
-- 11 texture uploads;
-- more than 35,000 draw calls;
+- 151 texture uploads;
+- 35,049 draw calls;
 - a non-black framebuffer;
-- synthetic JNI keys causing at least two measured scene changes.
+- synthetic JNI keys causing three measured scene changes.
 
 Real R36S testing confirms centred 640x480 output, a working menu cursor and
-working pad input. The remaining device issues are mostly-white/broken 3D
-materials on Mali and no audio. Save data and a complete play-through still
-require testing.
+working pad input. The white 3D scene was traced to PVRTC textures unsupported
+by Mali-G31. This build decodes them to RGBA8888 in software; the corrected
+menu is verified locally and this candidate awaits confirmation on the R36S.
+Audio, save data and a complete play-through still require testing.
 
 ## Your game files
 

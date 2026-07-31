@@ -57,6 +57,7 @@ exec docker run --rm \
     -e EGL_PLATFORM=surfaceless \
     -e LOADER_TRACE=1 \
     -e DEADSPACE_CONTROL_DIR=/control \
+    -e DEADSPACE_GL_DIAG="${DEADSPACE_GL_DIAG:-}" \
     "$IMAGE" \
     qemu-arm -L /usr/arm-linux-gnueabihf \
         ./build/deadspace /game
