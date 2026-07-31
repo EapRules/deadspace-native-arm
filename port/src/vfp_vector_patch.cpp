@@ -149,7 +149,7 @@ static uint32_t encode_f32(const DecodedVfp &decoded,
                            uint32_t destination, uint32_t left,
                            uint32_t right)
 {
-    uint32_t instruction;
+    uint32_t instruction = 0;
     switch (decoded.op) {
     case VfpOp::Move:               instruction = 0xeeb00a40; break;
     case VfpOp::Add:                instruction = 0xee300a00; break;

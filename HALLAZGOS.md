@@ -65,6 +65,36 @@ ni transforms. Así que:
 Verificar en la consola antes de dar el audio por bueno. No asumir que porque sonó bien
 bajo el harness va a sonar bien en el aparato.
 
+### Cómo quedó resuelto, y cómo se comprobó sin tener la consola
+
+`port/src/vfp_vector_patch.cpp` expande cada instrucción vectorial a sus lanes escalares
+en un trampolín, al cargar el módulo. Son 40 instrucciones, todas en el bloque de audio.
+
+Lo interesante no es el parche sino que **la divergencia que lo hace necesario es la misma
+que permite verificarlo**: qemu implementa LEN/STRIDE. O sea el emulador puede ejecutar la
+versión original *y* la expandida y decir si dan lo mismo. Dos chequeos, uno por cada
+forma de estar equivocado:
+
+- **Cada entrada expande bien** — `DEADSPACE_VFP_SELFTEST=1`. Arma dos stubs en memoria
+  ejecutable, les carga los mismos 32 registros VFP, corre la instrucción original con LEN
+  puesto y la expansión escalar, y compara registro por registro. Resultado: **40/40
+  exactas**, y los 40 opcodes confirmados vectorizando en el host — sin esa confirmación
+  el lado de referencia podría no ser un vector y el 40/40 no diría nada. Control negativo
+  hecho: rompiendo a propósito el avance de un operando, el test marca instrucción y
+  registro exactos, con lane 0 coincidiendo y 1-3 no.
+- **No falta ninguna** — `python3 port/analysis/vfp_coverage.py`. El self-test no puede ver
+  una instrucción que nunca se listó. Este reconstruye las 20 regiones LEN desde la
+  disassembly y exige acuerdo en las dos direcciones: nada sin parchear adentro, nada
+  parcheado afuera. Resultado: **40/40**, y las 40 palabras coinciden con el binario.
+
+Lo que **no** funcionó, anotado porque cuesta tiempo redescubrirlo: comparar el PCM que
+produce el juego con y sin parche. El mixer depende de cuánto tiempo de juego pasó, así
+que dos corridas del *mismo* build ya difieren apenas el audio deja de ser silencio. Los
+primeros ~512 writes son idénticos porque son ceros. No hay contra qué comparar.
+
+Queda igual la advertencia original: esto prueba la aritmética, no el camino de audio
+completo en el aparato.
+
 ## Lo que SÍ cambia respecto de Minigore 2 e Ice Rage
 
 ### 1. No es NativeActivity. Nosotros somos el Java.
