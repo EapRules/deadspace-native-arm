@@ -1105,3 +1105,17 @@ La secuencia y su licencia MIT se atribuyen a deadspace-vita en `NOTICE.md`,
 `CREDITS.md` y `third_party/deadspace-vita/LICENSE`. Falta confirmar ambos
 gatillos en la R36S: L2 durante el tutorial de modo de arma y R2 en una zona
 Zero-G.
+
+La build `fa8db99` se instaló después directamente sobre la SD de prueba en
+`/Volumes/ROMS/ports/`, usando el ZIP completo para validar el mismo contenido
+que recibirá el usuario final. La copia conservó `assets/`, `lib/` y `var/`; el
+SHA1 del donor siguió siendo el esperado y el binario instalado se verificó
+contra el build local:
+
+```text
+SHA256 d0ba9983a13a1cf7dbd7a7c5c26d57d544cd9e435ffe80308a03799ea20390de
+size   7215740 bytes
+```
+
+Se eliminaron exclusivamente los AppleDouble `._*` creados por macOS durante
+la copia antes de sincronizar y expulsar el volumen.
