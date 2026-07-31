@@ -5,6 +5,8 @@ R36S and similar Linux/ARM handhelds. There is no Android runtime and no
 emulator: the original ARM game library is loaded directly through a
 bionic/JNI compatibility layer.
 
+**Port and project by [EapRules](https://github.com/EapRules).**
+
 > **Bring your own game.** The release contains no EA game binary or asset.
 > Supply a copy you own; nothing is downloaded and no protection is bypassed.
 
@@ -157,4 +159,5 @@ Technologies' PowerVR SDK, and the ARMv8 short-vector expansion is adapted from
 Bythos14's VFPVector.
 
 The port is GPL-3.0. Exact notices and the copyright terms for every bundled
-shared library are shipped under `licenses/`.
+shared library are shipped under `licenses/`; the complete project attribution
+is also preserved in `CREDITS.md`.

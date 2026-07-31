@@ -1,6 +1,8 @@
 Put your own Dead Space Mobile Xperia Play v1.1.33 APK, ZIP, or extracted
 folder in this directory. The filename does not matter.
 
+Dead Space PortMaster port and eapx extractor by EapRules.
+
 The port validates this exact native library before extracting anything:
 
   lib/armeabi/libEAMGameDeadSpace.so

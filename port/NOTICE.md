@@ -4,6 +4,11 @@ This port is released under **GPL-3.0** (see `LICENSE`). It carries code from
 several upstream projects; this file records where each part came from, because
 the licences differ and the originals must keep their attribution.
 
+The Dead Space PortMaster port, its project direction and the `eapx` extraction
+tool were created by **EapRules**. The detailed technical hand-off records the
+later contributions from Claude and ChatGPT/Codex without replacing that
+primary project credit.
+
 ## Where the code comes from
 
 | Part | Origin | Licence |

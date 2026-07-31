@@ -31,6 +31,7 @@ cp ports/deadspace/gameinfo.xml     "$STAGE/deadspace/"
 cp ports/deadspace/cover.png        "$STAGE/deadspace/"
 cp ports/deadspace/screenshot.png   "$STAGE/deadspace/"
 cp ports/deadspace/README.md        "$STAGE/deadspace/"
+cp ports/deadspace/CREDITS.md       "$STAGE/deadspace/"
 cp ports/deadspace/grab_screen.sh   "$STAGE/deadspace/"
 cp -R build/libs.armhf              "$STAGE/deadspace/"
 
@@ -54,6 +55,7 @@ listing="$(unzip -Z1 "$OUT")"
 for required in "Dead Space.sh" "deadspace/deadspace" \
                 "deadspace/deadspace.gptk" "deadspace/port.json" \
                 "deadspace/gameinfo.xml" "deadspace/README.md" \
+                "deadspace/CREDITS.md" \
                 "deadspace/cover.png" "deadspace/screenshot.png" \
                 "deadspace/eapx.py" \
                 "deadspace/deadspace.eapx.json" \

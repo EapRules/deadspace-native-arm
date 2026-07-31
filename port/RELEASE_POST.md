@@ -17,6 +17,8 @@ patches the hardware incompatibilities at load time.
 
 Open source, GPL-3.0, free. The release contains zero EA game content.
 
+Port and project by **EapRules**.
+
 Download: https://github.com/EapRules/deadspace-portmaster/releases
 
 **READ THIS FIRST: you need the Xperia Play v1.1.33 release.**

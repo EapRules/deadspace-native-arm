@@ -1,5 +1,9 @@
 # Dead Space — traspaso técnico
 
+**Proyecto, dirección del port, pruebas de dispositivo y eapx: EapRules.**
+Las contribuciones posteriores de cada agente se separan abajo para conservar
+la atribución técnica sin reemplazar la autoría principal del proyecto.
+
 Estado actual (actualización ChatGPT/Codex, 2026-07-31): **M7 de 7**. El
 verificador inmutable completó 555 frames con consumo de audio en tiempo real,
 cargó contenido, procesó 151 uploads de textura, hizo 34.476 draws y demostró
@@ -1036,8 +1040,8 @@ Artefacto independiente final, libre de contenido de EA:
 
 ```text
 port/build/deadspace.zip
-size   8012014 bytes
-SHA256 18331bbbc74ec793187ddb6398eb2f889b442b66d15880f66bf0ed1740203b62
+size   8013018 bytes
+SHA256 2ac633b3896f9c981c4f9c709129b59da35c9e8aa057626885a02c9f807b0b54
 ```
 
 La última corrida del verificador inmutable posterior al empaquetado alcanzó

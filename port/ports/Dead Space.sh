@@ -1,6 +1,7 @@
 #!/bin/bash
 #
 # Dead Space (Android/Xperia Play 1.1.33) — PortMaster launcher.
+# Port and project by EapRules: https://github.com/EapRules
 #
 # The port never ships EA's files. The user's extracted game tree lives next
 # to the loader and must contain:

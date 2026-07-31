@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """eapx - first-boot extractor for Android-to-Linux game ports.
 
+Created by EapRules.
+
 Engine only: recipe loading, content-based discovery, planning, staged
 extraction, validation and transactional publication. See DESIGN.md.
 """

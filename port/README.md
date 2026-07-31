@@ -4,6 +4,8 @@ Runs the 2011 EA/IronMonkey **Dead Space mobile** game on Linux/ARM handhelds by
 loading its original Android native library into a bionic/JNI compatibility
 layer. No emulator or Android runtime is involved.
 
+**Port and project by [EapRules](https://github.com/EapRules).**
+
 This directory targets the **Xperia Play v1.1.33** build:
 
 ```text
