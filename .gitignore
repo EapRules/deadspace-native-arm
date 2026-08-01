@@ -1,0 +1,26 @@
+# The game is the user's own copy and never enters this repository.
+# NeededFiles/ is the extracted game tree (libEAMGameDeadSpace.so + 303 MB of
+# assets), dis/ holds a copy of the game library plus its disassembly, and
+# vita-ref/ is the MIT Vita port kept locally for reference.
+NeededFiles/
+dis/
+vita-ref/
+
+# Build artifacts. The release ZIP is published as a GitHub Release asset,
+# never committed.
+port/build/
+
+# Crash dumps from qemu harness runs.
+port/qemu_*.core
+*.core
+
+# Game packages in any form.
+*.apk
+*.7z
+
+# Internal working notes and drafts. Never published.
+notes/
+
+# macOS metadata.
+.DS_Store
+._*

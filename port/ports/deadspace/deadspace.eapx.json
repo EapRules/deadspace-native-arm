@@ -1,0 +1,171 @@
+{
+  "schema": 1,
+  "id": "deadspace-xperia-1.1.33",
+  "version": "2",
+  "title": "DEAD SPACE",
+  "abi_order": [
+    "armeabi"
+  ],
+  "input": {
+    "search_dirs": [
+      "gamedata",
+      "."
+    ]
+  },
+  "extract": [
+    {
+      "id": "native-library",
+      "description": "Xperia Play v1.1.33 native library",
+      "destination": "lib/armeabi/libEAMGameDeadSpace.so",
+      "source": {
+        "kind": "entry",
+        "patterns": [
+          "lib/armeabi/libEAMGameDeadSpace.so",
+          "deadspace/lib/armeabi/libEAMGameDeadSpace.so",
+          "data/deadspace/lib/armeabi/libEAMGameDeadSpace.so",
+          "NeededFiles/data/deadspace/lib/armeabi/libEAMGameDeadSpace.so"
+        ]
+      },
+      "validate": {
+        "size": 4499468,
+        "sha256": "1ff0a34a2ef35f50c0031b383d8fd7b14369dca0f41969c5d4da8fabe569ed38",
+        "elf_machine": "armeabi"
+      }
+    },
+    {
+      "id": "assets-apk",
+      "description": "game assets at the Android package root",
+      "required": false,
+      "destination": "assets",
+      "source": {
+        "kind": "entries",
+        "patterns": [
+          "assets/*"
+        ],
+        "strip_prefix": "assets/"
+      },
+      "validate": {
+        "min_files": 1700,
+        "min_bytes": 254000000
+      }
+    },
+    {
+      "id": "assets-deadspace",
+      "description": "game assets under a deadspace directory",
+      "required": false,
+      "destination": "assets",
+      "source": {
+        "kind": "entries",
+        "patterns": [
+          "deadspace/assets/*"
+        ],
+        "strip_prefix": "deadspace/assets/"
+      },
+      "validate": {
+        "min_files": 1700,
+        "min_bytes": 254000000
+      }
+    },
+    {
+      "id": "assets-data-deadspace",
+      "description": "game assets under data/deadspace",
+      "required": false,
+      "destination": "assets",
+      "source": {
+        "kind": "entries",
+        "patterns": [
+          "data/deadspace/assets/*"
+        ],
+        "strip_prefix": "data/deadspace/assets/"
+      },
+      "validate": {
+        "min_files": 1700,
+        "min_bytes": 254000000
+      }
+    },
+    {
+      "id": "assets-neededfiles",
+      "description": "game assets under NeededFiles/data/deadspace",
+      "required": false,
+      "destination": "assets",
+      "source": {
+        "kind": "entries",
+        "patterns": [
+          "NeededFiles/data/deadspace/assets/*"
+        ],
+        "strip_prefix": "NeededFiles/data/deadspace/assets/"
+      },
+      "validate": {
+        "min_files": 1700,
+        "min_bytes": 254000000
+      }
+    }
+  ],
+  "validate": [
+    {
+      "path": "lib/armeabi/libEAMGameDeadSpace.so",
+      "size": 4499468,
+      "sha256": "1ff0a34a2ef35f50c0031b383d8fd7b14369dca0f41969c5d4da8fabe569ed38",
+      "elf_machine": "armeabi"
+    },
+    {
+      "path": "assets/EAMCore.ini",
+      "size": 3119,
+      "sha256": "d5b49184291c9a56928481380e19e8ead7f2df7b031201ffad52d8f374e05335"
+    },
+    {
+      "path": "assets/published",
+      "min_files": 1700,
+      "min_bytes": 254000000
+    },
+    {
+      "path": "assets/published/data/level_index.sb",
+      "sha256": [
+        "ff80c9fd92b3a7b42405991700b3d066238c94c7280e0dcaac84ab677c4916a6",
+        "ef14959fea9519b6f698e153bc66cf0a4f9a49bff03d97f0f14b204136320636"
+      ]
+    },
+    {
+      "path": "assets/published/layoutdata/layouts.xml.sb",
+      "sha256": [
+        "0f99badf5a7523ba0cc3e5749bf18b40807eb2d0fd11a66cc3c9c65656b4233a",
+        "c3c3e3e7fd81b92cd6c1789a535c66c540e5bdb9cfcd73315c9b223bc5c2a78d"
+      ]
+    },
+    {
+      "path": "assets/published/maps/01_gov_01.scene.sb",
+      "sha256": [
+        "545104b57128e0c7991f4bdb0178ff172922addbe8651d6e94f648998fb51857",
+        "59f84d0e52e434bb1bdbf5c196d8865c1bdff3a091a3eb528eea9898ec07c081"
+      ]
+    },
+    {
+      "path": "assets/published/models/main_menu.m3g",
+      "sha256": [
+        "fb3c31c1ce7d45d0c53807695ffa5b9d44e47750b8c8c978aadc49d318e99c65",
+        "58f88fed2d49276b7fc492ce2286f657820df3ba2b02cc01cda24c13cdd8d9e3"
+      ]
+    },
+    {
+      "path": "assets/published/texturepacks_ui/ui_frontend.m3g",
+      "sha256": [
+        "d037a87dfdbea2719077cfc12b69777d47bb155195c66e230c82956f7ac87cb7",
+        "0fa9c375a867dbeba56d34c28d2d4a0ea2cffdeb63869486be3ebc2bf08fa809"
+      ]
+    },
+    {
+      "path": "assets/published/sounds/soundBase.sb",
+      "sha256": "370d75a5d373d690f58b1470a39ca8b4998556419f3f92ad77b8ec9f02eb59c8"
+    }
+  ],
+  "commit": [
+    "assets",
+    "lib"
+  ],
+  "marker": ".eapx-deadspace-data.json",
+  "log": "eapx.log",
+  "placeholder": "PUT_DEAD_SPACE_DATA_HERE.txt",
+  "space": {
+    "safety_bytes": 67108864
+  }
+}
