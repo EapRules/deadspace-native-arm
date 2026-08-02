@@ -1,0 +1,8 @@
+# The image build only needs the source tree and third_party/ (the SDL tarball
+# the Dockerfile COPYs). Everything below is regenerated inside the container or
+# debugging spill; as build context it slows every docker build.
+*.core
+build/
+harness/results/
+.git/
+*.log

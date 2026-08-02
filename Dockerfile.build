@@ -1,0 +1,78 @@
+# Cross-compilation environment for the Dead Space armhf loader.
+# Runs natively on arm64 (fast) and emits arm-linux-gnueabihf binaries, which is
+# what the R36S needs: the game's only native library is armeabi-v7a.
+#
+# Pinned to bullseye ON PURPOSE, not for reproducibility but for reach: the
+# binary and every bundled .so demand at most the glibc of the image they were
+# built in. A modern base (trixie = glibc 2.41) makes the linker reference
+# GLIBC_2.34/2.38 symbols, and CFWs like ArkOS/AeolusUX ship glibc 2.28-2.31,
+# so the port dies at load with "GLIBC_2.34 not found" - the single most common
+# PortMaster portability failure, reported by real users against this port, and
+# one the qemu/Mesa harness cannot see because it runs on a modern host.
+# bullseye = glibc 2.31; its gcc-10 already has the C++20 the loader needs.
+# glibc is forward-compatible, so a 2.31 binary runs on every newer firmware
+# too. tools/check_glibc_floor.sh enforces the ceiling at build time.
+FROM debian:bullseye
+
+RUN dpkg --add-architecture armhf && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        crossbuild-essential-armhf \
+        pkg-config \
+        make \
+        git \
+        python3 \
+        ca-certificates \
+        file \
+        libsdl2-dev:armhf \
+        zlib1g-dev:armhf \
+        libzip-dev:armhf \
+        libbsd-dev:armhf \
+        qemu-user \
+        libgles1:armhf \
+        libegl-dev:armhf \
+        libgles-dev:armhf \
+    && rm -rf /var/lib/apt/lists/*
+# This image is BOTH the cross-compiler and the harness runtime - harness/verify.sh
+# hardcodes it as IMAGE=deadspace-build and runs the armhf loader inside it. That
+# needs qemu-user (arm64 host binary that executes the armhf ELF) plus a software
+# GLES stack: the rest of Mesa (libgl1-mesa-dri, libegl-mesa0, libgles2, llvmpipe)
+# arrives as an armhf dependency of libsdl2-dev, but libgles1 (GLES 1.1, which this
+# game is) is not pulled by anything else, so it is named explicitly. libegl-dev /
+# libgles-dev are build deps for the SDL below. Leaving the runtime pieces out
+# builds a perfectly good release binary whose harness cannot run - "qemu-arm: No
+# such file or directory" - so keep them here even though only the loader needs the
+# compiler. If you split build vs. test images later, verify.sh's hardcoded name is
+# the constraint to respect.
+
+# SDL with the offscreen video driver, built from a vendored source tarball.
+#
+# The harness runs headless (SDL_VIDEODRIVER=offscreen) so it can create a real
+# EGL/GLES context on llvmpipe with no display and count actual rendered frames.
+# The offscreen driver first shipped a configure switch in SDL 2.0.22; bullseye's
+# stock libSDL2 is 2.0.14 and was built without it, so SDL_Init(video) fails with
+# "offscreen not available" and every gl* import then goes unresolved. We build
+# 2.0.22 with --enable-video-offscreen and let `make install` overwrite the apt
+# SDL (headers, lib and the pkg-config file, kept consistent at 2.0.22).
+#
+# This does NOT weaken bring-your-own-glibc/portability: SDL has no symbol
+# versioning, the loader only calls base-2.0 APIs, and at runtime on the device it
+# uses the CFW's own SDL via the stable libSDL2-2.0.so.0 soname - this build is
+# only what the loader links against and what the harness runs on. The tarball is
+# vendored (third_party/) so the image build needs no network. Source:
+# https://libsdl.org/release/SDL2-2.0.22.tar.gz
+COPY third_party/SDL2-2.0.22.tar.gz /tmp/
+RUN cd /tmp && tar xzf SDL2-2.0.22.tar.gz && cd SDL2-2.0.22 && \
+    ./configure --host=arm-linux-gnueabihf --prefix=/usr \
+        --libdir=/usr/lib/arm-linux-gnueabihf \
+        --enable-video-offscreen --enable-video-dummy \
+        --enable-video-opengl --enable-video-opengles \
+        --enable-video-opengles1 --enable-video-opengles2 \
+        --disable-video-x11 --disable-video-wayland --disable-video-kmsdrm \
+        --disable-video-vulkan && \
+    make -j"$(nproc)" && make install && \
+    cd /tmp && rm -rf SDL2-2.0.22 SDL2-2.0.22.tar.gz
+
+ENV PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
+ENV PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig
+WORKDIR /src

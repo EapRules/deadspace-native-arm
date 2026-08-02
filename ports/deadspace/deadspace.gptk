@@ -1,0 +1,36 @@
+# Dead Space — every control deliberately unbound.
+#
+# The port reads the gamepad through SDL_GameController and calls the game's
+# exported KeyboardAndroid/TouchSurfaceAndroid JNI entry points directly
+# (android/input_bridge.cpp). If gptokeyb also emitted keystrokes for those
+# same presses the game would see each one twice.
+#
+# gptokeyb still runs, with the binary name, so the standard PortMaster exit
+# combination can terminate it. Everything else maps to nothing.
+#
+# The syntax is gptokeyb's own: \" is "no key".
+
+back = \"
+start = \"
+a = \"
+b = \"
+x = \"
+y = \"
+l1 = \"
+l2 = \"
+l3 = \"
+r1 = \"
+r2 = \"
+r3 = \"
+up = \"
+down = \"
+left = \"
+right = \"
+left_analog_up = \"
+left_analog_down = \"
+left_analog_left = \"
+left_analog_right = \"
+right_analog_up = \"
+right_analog_down = \"
+right_analog_left = \"
+right_analog_right = \"

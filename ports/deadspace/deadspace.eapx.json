@@ -1,0 +1,614 @@
+{
+  "schema": 1,
+  "id": "deadspace-xperia-1.1.33",
+  "version": "3",
+  "requires_eapx": ">=0.3.0",
+  "title": "DEAD SPACE",
+  "abi_order": [
+    "armeabi"
+  ],
+  "input": {
+    "search_dirs": [
+      "gamedata",
+      "."
+    ]
+  },
+  "extract": [
+    {
+      "id": "native-library",
+      "description": "Xperia Play v1.1.33 native library",
+      "destination": "lib/armeabi/libEAMGameDeadSpace.so",
+      "source": {
+        "kind": "entry",
+        "patterns": [
+          "lib/armeabi/libEAMGameDeadSpace.so",
+          "deadspace/lib/armeabi/libEAMGameDeadSpace.so",
+          "data/deadspace/lib/armeabi/libEAMGameDeadSpace.so",
+          "NeededFiles/data/deadspace/lib/armeabi/libEAMGameDeadSpace.so"
+        ]
+      },
+      "validate": {
+        "size": 4499468,
+        "sha256": [
+          "1ff0a34a2ef35f50c0031b383d8fd7b14369dca0f41969c5d4da8fabe569ed38"
+        ],
+        "elf_machine": "armeabi",
+        "critical_regions": {
+          "regions": [
+            {
+              "offset": "0x25e2f0",
+              "size": 4
+            },
+            {
+              "offset": "0x25e2f4",
+              "size": 4
+            },
+            {
+              "offset": "0x25e308",
+              "size": 4
+            },
+            {
+              "offset": "0x25e31c",
+              "size": 4
+            },
+            {
+              "offset": "0x25e330",
+              "size": 4
+            },
+            {
+              "offset": "0x25e334",
+              "size": 4
+            },
+            {
+              "offset": "0x25e348",
+              "size": 4
+            },
+            {
+              "offset": "0x262fb4",
+              "size": 4
+            },
+            {
+              "offset": "0x262fbc",
+              "size": 4
+            },
+            {
+              "offset": "0x264bc0",
+              "size": 4
+            },
+            {
+              "offset": "0x264bc4",
+              "size": 4
+            },
+            {
+              "offset": "0x264bc8",
+              "size": 4
+            },
+            {
+              "offset": "0x26d3b0",
+              "size": 4
+            },
+            {
+              "offset": "0x26d3b8",
+              "size": 4
+            },
+            {
+              "offset": "0x26d3bc",
+              "size": 4
+            },
+            {
+              "offset": "0x26d3c4",
+              "size": 4
+            },
+            {
+              "offset": "0x26d3c8",
+              "size": 4
+            },
+            {
+              "offset": "0x26d3cc",
+              "size": 4
+            },
+            {
+              "offset": "0x26d428",
+              "size": 4
+            },
+            {
+              "offset": "0x26d430",
+              "size": 4
+            },
+            {
+              "offset": "0x26d434",
+              "size": 4
+            },
+            {
+              "offset": "0x26d43c",
+              "size": 4
+            },
+            {
+              "offset": "0x26d444",
+              "size": 4
+            },
+            {
+              "offset": "0x26d448",
+              "size": 4
+            },
+            {
+              "offset": "0x26f17c",
+              "size": 4
+            },
+            {
+              "offset": "0x26f180",
+              "size": 4
+            },
+            {
+              "offset": "0x277d64",
+              "size": 4
+            },
+            {
+              "offset": "0x277ea0",
+              "size": 4
+            },
+            {
+              "offset": "0x278508",
+              "size": 4
+            },
+            {
+              "offset": "0x2785cc",
+              "size": 4
+            },
+            {
+              "offset": "0x278cd4",
+              "size": 4
+            },
+            {
+              "offset": "0x278dcc",
+              "size": 4
+            },
+            {
+              "offset": "0x291848",
+              "size": 4
+            },
+            {
+              "offset": "0x291970",
+              "size": 4
+            },
+            {
+              "offset": "0x291a28",
+              "size": 4
+            },
+            {
+              "offset": "0x291ae0",
+              "size": 4
+            },
+            {
+              "offset": "0x292118",
+              "size": 4
+            },
+            {
+              "offset": "0x292258",
+              "size": 4
+            },
+            {
+              "offset": "0x2922fc",
+              "size": 4
+            },
+            {
+              "offset": "0x292344",
+              "size": 4
+            },
+            {
+              "offset": "0x22bf6c",
+              "size": 4
+            },
+            {
+              "offset": "0x22bbe8",
+              "size": 4
+            },
+            {
+              "offset": "0x22b214",
+              "size": 4
+            },
+            {
+              "offset": "0x30d6f4",
+              "size": 64
+            }
+          ],
+          "sha256": "bfee065efd2797551bfb94791052ccd60dbd39f652a2c0330548cf3fc56bd22f"
+        }
+      }
+    },
+    {
+      "id": "assets-apk",
+      "description": "game assets at the Android package root",
+      "required": false,
+      "destination": "assets",
+      "source": {
+        "kind": "entries",
+        "patterns": [
+          "assets/*"
+        ],
+        "strip_prefix": "assets/"
+      },
+      "validate": {
+        "min_files": 1700,
+        "min_bytes": 254000000
+      }
+    },
+    {
+      "id": "assets-deadspace",
+      "description": "game assets under a deadspace directory",
+      "required": false,
+      "destination": "assets",
+      "source": {
+        "kind": "entries",
+        "patterns": [
+          "deadspace/assets/*"
+        ],
+        "strip_prefix": "deadspace/assets/"
+      },
+      "validate": {
+        "min_files": 1700,
+        "min_bytes": 254000000
+      }
+    },
+    {
+      "id": "assets-data-deadspace",
+      "description": "game assets under data/deadspace",
+      "required": false,
+      "destination": "assets",
+      "source": {
+        "kind": "entries",
+        "patterns": [
+          "data/deadspace/assets/*"
+        ],
+        "strip_prefix": "data/deadspace/assets/"
+      },
+      "validate": {
+        "min_files": 1700,
+        "min_bytes": 254000000
+      }
+    },
+    {
+      "id": "assets-neededfiles",
+      "description": "game assets under NeededFiles/data/deadspace",
+      "required": false,
+      "destination": "assets",
+      "source": {
+        "kind": "entries",
+        "patterns": [
+          "NeededFiles/data/deadspace/assets/*"
+        ],
+        "strip_prefix": "NeededFiles/data/deadspace/assets/"
+      },
+      "validate": {
+        "min_files": 1700,
+        "min_bytes": 254000000
+      }
+    }
+  ],
+  "validate": [
+    {
+      "path": "lib/armeabi/libEAMGameDeadSpace.so",
+      "size": 4499468,
+      "sha256": [
+        "1ff0a34a2ef35f50c0031b383d8fd7b14369dca0f41969c5d4da8fabe569ed38"
+      ],
+      "elf_machine": "armeabi",
+      "critical_regions": {
+        "regions": [
+          {
+            "offset": "0x25e2f0",
+            "size": 4
+          },
+          {
+            "offset": "0x25e2f4",
+            "size": 4
+          },
+          {
+            "offset": "0x25e308",
+            "size": 4
+          },
+          {
+            "offset": "0x25e31c",
+            "size": 4
+          },
+          {
+            "offset": "0x25e330",
+            "size": 4
+          },
+          {
+            "offset": "0x25e334",
+            "size": 4
+          },
+          {
+            "offset": "0x25e348",
+            "size": 4
+          },
+          {
+            "offset": "0x262fb4",
+            "size": 4
+          },
+          {
+            "offset": "0x262fbc",
+            "size": 4
+          },
+          {
+            "offset": "0x264bc0",
+            "size": 4
+          },
+          {
+            "offset": "0x264bc4",
+            "size": 4
+          },
+          {
+            "offset": "0x264bc8",
+            "size": 4
+          },
+          {
+            "offset": "0x26d3b0",
+            "size": 4
+          },
+          {
+            "offset": "0x26d3b8",
+            "size": 4
+          },
+          {
+            "offset": "0x26d3bc",
+            "size": 4
+          },
+          {
+            "offset": "0x26d3c4",
+            "size": 4
+          },
+          {
+            "offset": "0x26d3c8",
+            "size": 4
+          },
+          {
+            "offset": "0x26d3cc",
+            "size": 4
+          },
+          {
+            "offset": "0x26d428",
+            "size": 4
+          },
+          {
+            "offset": "0x26d430",
+            "size": 4
+          },
+          {
+            "offset": "0x26d434",
+            "size": 4
+          },
+          {
+            "offset": "0x26d43c",
+            "size": 4
+          },
+          {
+            "offset": "0x26d444",
+            "size": 4
+          },
+          {
+            "offset": "0x26d448",
+            "size": 4
+          },
+          {
+            "offset": "0x26f17c",
+            "size": 4
+          },
+          {
+            "offset": "0x26f180",
+            "size": 4
+          },
+          {
+            "offset": "0x277d64",
+            "size": 4
+          },
+          {
+            "offset": "0x277ea0",
+            "size": 4
+          },
+          {
+            "offset": "0x278508",
+            "size": 4
+          },
+          {
+            "offset": "0x2785cc",
+            "size": 4
+          },
+          {
+            "offset": "0x278cd4",
+            "size": 4
+          },
+          {
+            "offset": "0x278dcc",
+            "size": 4
+          },
+          {
+            "offset": "0x291848",
+            "size": 4
+          },
+          {
+            "offset": "0x291970",
+            "size": 4
+          },
+          {
+            "offset": "0x291a28",
+            "size": 4
+          },
+          {
+            "offset": "0x291ae0",
+            "size": 4
+          },
+          {
+            "offset": "0x292118",
+            "size": 4
+          },
+          {
+            "offset": "0x292258",
+            "size": 4
+          },
+          {
+            "offset": "0x2922fc",
+            "size": 4
+          },
+          {
+            "offset": "0x292344",
+            "size": 4
+          },
+          {
+            "offset": "0x22bf6c",
+            "size": 4
+          },
+          {
+            "offset": "0x22bbe8",
+            "size": 4
+          },
+          {
+            "offset": "0x22b214",
+            "size": 4
+          },
+          {
+            "offset": "0x30d6f4",
+            "size": 64
+          }
+        ],
+        "sha256": "bfee065efd2797551bfb94791052ccd60dbd39f652a2c0330548cf3fc56bd22f"
+      }
+    },
+    {
+      "path": "assets/EAMCore.ini",
+      "size": 3119,
+      "sha256": "d5b49184291c9a56928481380e19e8ead7f2df7b031201ffad52d8f374e05335"
+    },
+    {
+      "path": "assets/published",
+      "min_files": 1700,
+      "min_bytes": 254000000
+    },
+    {
+      "path": "assets/published/data/level_index.sb",
+      "sha256": [
+        "ff80c9fd92b3a7b42405991700b3d066238c94c7280e0dcaac84ab677c4916a6",
+        "ef14959fea9519b6f698e153bc66cf0a4f9a49bff03d97f0f14b204136320636"
+      ]
+    },
+    {
+      "path": "assets/published/layoutdata/layouts.xml.sb",
+      "sha256": [
+        "0f99badf5a7523ba0cc3e5749bf18b40807eb2d0fd11a66cc3c9c65656b4233a",
+        "c3c3e3e7fd81b92cd6c1789a535c66c540e5bdb9cfcd73315c9b223bc5c2a78d"
+      ]
+    },
+    {
+      "path": "assets/published/maps/01_gov_01.scene.sb",
+      "sha256": [
+        "545104b57128e0c7991f4bdb0178ff172922addbe8651d6e94f648998fb51857",
+        "59f84d0e52e434bb1bdbf5c196d8865c1bdff3a091a3eb528eea9898ec07c081"
+      ]
+    },
+    {
+      "path": "assets/published/models/main_menu.m3g",
+      "sha256": [
+        "fb3c31c1ce7d45d0c53807695ffa5b9d44e47750b8c8c978aadc49d318e99c65",
+        "58f88fed2d49276b7fc492ce2286f657820df3ba2b02cc01cda24c13cdd8d9e3"
+      ]
+    },
+    {
+      "path": "assets/published/texturepacks_ui/ui_frontend.m3g",
+      "sha256": [
+        "d037a87dfdbea2719077cfc12b69777d47bb155195c66e230c82956f7ac87cb7",
+        "0fa9c375a867dbeba56d34c28d2d4a0ea2cffdeb63869486be3ebc2bf08fa809"
+      ]
+    },
+    {
+      "path": "assets/published/sounds/soundBase.sb",
+      "sha256": "370d75a5d373d690f58b1470a39ca8b4998556419f3f92ad77b8ec9f02eb59c8"
+    }
+  ],
+  "profiles": [
+    {
+      "id": "full-pvrtc-original",
+      "description": "Original complete Xperia Play PVRTC donor",
+      "validate": [
+        {
+          "path": "assets/published/data/level_index.sb",
+          "sha256": "ff80c9fd92b3a7b42405991700b3d066238c94c7280e0dcaac84ab677c4916a6"
+        },
+        {
+          "path": "assets/published/layoutdata/layouts.xml.sb",
+          "sha256": "0f99badf5a7523ba0cc3e5749bf18b40807eb2d0fd11a66cc3c9c65656b4233a"
+        },
+        {
+          "path": "assets/published/models/isaac.m3g",
+          "sha256": "92b465651a53593249aa6c538de3b7f71de13a91f4f98003d6386b624106082d"
+        },
+        {
+          "path": "assets/published/textures/texture_isaac_suit_01.m3g",
+          "sha256": "b34d1e338744750f2e03b9a6c401a83ce3db1796e801d497b1dd8ee37135f1c9"
+        },
+        {
+          "path": "assets/published/maps/01_survival.scene.sb",
+          "min_size": 1
+        },
+        {
+          "path": "assets/published/models/burst_rifle.m3g",
+          "min_size": 1
+        }
+      ]
+    },
+    {
+      "id": "full-pvrtc-repacked",
+      "description": "Legacy ID: ETC1 repack, detected but not runtime-compatible yet",
+      "validate": [
+        {
+          "path": "assets/published/data/level_index.sb",
+          "sha256": "ef14959fea9519b6f698e153bc66cf0a4f9a49bff03d97f0f14b204136320636"
+        },
+        {
+          "path": "assets/published/layoutdata/layouts.xml.sb",
+          "sha256": "c3c3e3e7fd81b92cd6c1789a535c66c540e5bdb9cfcd73315c9b223bc5c2a78d"
+        },
+        {
+          "path": "assets/published/models/isaac.m3g",
+          "sha256": "fe287a58c55f7290dda080a0db43995bf0deb4c07c2580a509fafe87f33c3c02"
+        },
+        {
+          "path": "assets/published/textures/texture_isaac_suit_01.m3g",
+          "sha256": "2215b09985eb8a47497961c1e975e02623539aa4c78932d2a514d1db216ad96c"
+        }
+      ]
+    },
+    {
+      "id": "vita-rip-atc",
+      "description": "Reduced Vita RIP donor using ATC textures",
+      "validate": [
+        {
+          "path": "assets/published/data/level_index.sb",
+          "sha256": "ef14959fea9519b6f698e153bc66cf0a4f9a49bff03d97f0f14b204136320636"
+        },
+        {
+          "path": "assets/published/layoutdata/layouts.xml.sb",
+          "sha256": "0f99badf5a7523ba0cc3e5749bf18b40807eb2d0fd11a66cc3c9c65656b4233a"
+        },
+        {
+          "path": "assets/published/models/isaac.m3g",
+          "sha256": "fe287a58c55f7290dda080a0db43995bf0deb4c07c2580a509fafe87f33c3c02"
+        },
+        {
+          "path": "assets/published/textures/texture_isaac_suit_01.m3g",
+          "sha256": "c6e1c92745dfc2f75f6896cdb23a15fdc0f4041af349a25bc169ce3175c3294c"
+        }
+      ]
+    }
+  ],
+  "commit": [
+    "assets",
+    "lib"
+  ],
+  "marker": ".eapx-deadspace-data.json",
+  "log": "eapx.log",
+  "placeholder": "PUT_DEAD_SPACE_DATA_HERE.txt",
+  "space": {
+    "safety_bytes": 67108864
+  }
+}

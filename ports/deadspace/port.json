@@ -1,0 +1,42 @@
+{
+  "version": 4,
+  "name": "deadspace-portmaster.zip",
+  "items": [
+    "Dead Space.sh",
+    "deadspace"
+  ],
+  "items_opt": [],
+  "attr": {
+    "title": "Dead Space",
+    "porter": [
+      "EapRules"
+    ],
+    "desc": "The 2011 Dead Space mobile survival-horror game by IronMonkey Studios, running its original Android ARM library directly on Linux through a bionic/JNI compatibility loader.",
+    "desc_md": null,
+    "inst": "Supply your own Dead Space Mobile for Xperia Play v1.1.33 APK, ZIP, or extracted folder. Put it in ports/deadspace/; the donor filename does not matter and the first launch extracts and validates it automatically. Keep the port release named deadspace-portmaster.zip. Wait for PortMaster's Finished running autoinstall dialog, then reboot normally before looking for the game in Ports. The supported native-library SHA1 is 0ed42b611415015807f759ec9b5457857143ce39. No game data is included.",
+    "inst_md": null,
+    "genres": [
+      "action",
+      "adventure"
+    ],
+    "image": {},
+    "rtr": false,
+    "exp": false,
+    "runtime": null,
+    "reqs": [
+      "analog_2"
+    ],
+    "arch": [
+      "armhf"
+    ],
+    "min_glibc": "2.29",
+    "status": {
+      "source": "https://github.com/eaprules/deadspace-portmaster",
+      "date_added": "2026-07-31"
+    },
+    "publisher": "Electronic Arts",
+    "developer": "IronMonkey Studios",
+    "released": "2011-01-25",
+    "players": "1"
+  }
+}

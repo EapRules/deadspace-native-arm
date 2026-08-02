@@ -1,0 +1,8 @@
+build/
+*.core
+harness/results/
+emulator/runtime/
+__pycache__/
+*.pyc
+.DS_Store
+._*
