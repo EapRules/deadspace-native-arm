@@ -59,56 +59,125 @@
 
 #include "so_util.h"
 #include "thunk_gen.h"
+#include "time_scale.h"
 #include "trace.h"
 
-/* Test-only wall-clock acceleration.  NativeOnDrawFrame still runs every
- * frame; only elapsed time observed by the game is scaled so unskippable EA
- * splashes and cinematics do not make the compatibility matrix take an hour.
- * Production never sets the variable and receives the host clock verbatim. */
-static double test_time_scale(void)
+/*
+ * Development-only clock acceleration. The contract, the reasoning and the list
+ * of what is deliberately left unscaled are in time_scale.h; this is only where
+ * it happens to live, because these are the functions it acts on.
+ *
+ * DEADSPACE_TEST_TIME_SCALE is this port's original, game-specific spelling of
+ * the same idea, kept as an alias so the compatibility-matrix runs that use it
+ * keep working. It is the one thing here that knows a game's name, and it goes
+ * away once those runs move to DEADSPACE_TIME_SCALE.
+ */
+
+/*
+ * The multiplier, parsed once. Capped at 64 because past that the offset grows
+ * further between two frames than any engine's interpolation expects, and
+ * physics stepped off the clock starts tunnelling through geometry - which
+ * reads as a port bug and is not one.
+ */
+double port_time_scale(void)
 {
-    static double scale = [] {
-        const char *value = getenv("DEADSPACE_TEST_TIME_SCALE");
+    static const double scale = [] {
+        const char *value = getenv("DEADSPACE_TIME_SCALE");
+        const char *name  = "DEADSPACE_TIME_SCALE";
+        if (!value || !*value) {
+            value = getenv("DEADSPACE_TEST_TIME_SCALE");
+            name  = "DEADSPACE_TEST_TIME_SCALE";
+        }
         if (!value || !*value)
             return 1.0;
+
         char *end = NULL;
-        double parsed = strtod(value, &end);
-        if (end == value || parsed < 1.0 || parsed > 16.0)
-            parsed = 1.0;
+        const double parsed = strtod(value, &end);
+        if (end == value || (end && *end != '\0') || !(parsed >= 1.0) ||
+            parsed > 64.0) {
+            warning("%s=%s is not a scale between 1 and 64; ignoring it.\n",
+                    name, value);
+            return 1.0;
+        }
         if (parsed != 1.0)
-            trace("test clock scale=%.2fx", parsed);
+            warning("time scale %.2fx - development emulator only. The guest's "
+                    "monotonic clock and gettimeofday run fast; CLOCK_REALTIME, "
+                    "time() and localtime() do not.\n", parsed);
         return parsed;
     }();
     return scale;
 }
 
-static int64_t test_extra_nanoseconds(void)
+int64_t port_time_scale_offset_ns(void)
 {
-    double scale = test_time_scale();
+    const double scale = port_time_scale();
     if (scale == 1.0)
-        return 0;
-    static struct timespec origin = [] {
-        struct timespec value = {};
+        return 0;   /* the whole feature, off, before any clock is read */
+
+    /* Anchored on the first call, which is the earliest moment the offset is
+     * observable by anyone. Function-local static init is thread-safe, and it
+     * needs to be: the render thread and the audio thread do arrive together. */
+    static const struct timespec origin = [] {
+        struct timespec value = {0, 0};
         clock_gettime(CLOCK_MONOTONIC, &value);
         return value;
     }();
-    struct timespec now = {};
+
+    struct timespec now = {0, 0};
     clock_gettime(CLOCK_MONOTONIC, &now);
-    int64_t elapsed = (int64_t)(now.tv_sec - origin.tv_sec) * 1000000000LL
-                    + (int64_t)now.tv_nsec - origin.tv_nsec;
+    const int64_t elapsed = (int64_t)(now.tv_sec - origin.tv_sec) * 1000000000LL
+                          + (int64_t)(now.tv_nsec - origin.tv_nsec);
+    if (elapsed <= 0)
+        return 0;
     return (int64_t)((double)elapsed * (scale - 1.0));
 }
 
-static void add_nanoseconds(struct timespec *value, int64_t extra)
+static void shift_timespec(struct timespec *value, int64_t delta_ns)
 {
-    if (!value || extra == 0)
+    if (!value || delta_ns == 0)
         return;
-    int64_t nanoseconds = (int64_t)value->tv_nsec + extra;
-    value->tv_sec += nanoseconds / 1000000000LL;
-    value->tv_nsec = nanoseconds % 1000000000LL;
-    if (value->tv_nsec < 0) {
-        value->tv_nsec += 1000000000LL;
-        value->tv_sec--;
+
+    int64_t total = (int64_t)value->tv_nsec + delta_ns;
+    value->tv_sec += (time_t)(total / 1000000000LL);
+    total %= 1000000000LL;
+    if (total < 0) {
+        total += 1000000000LL;
+        value->tv_sec -= 1;
+    }
+    value->tv_nsec = (long)total;
+}
+
+void port_time_scale_forward(struct timespec *value)
+{
+    shift_timespec(value, port_time_scale_offset_ns());
+}
+
+/*
+ * The offset read here is the one at the moment of the call, not the one in
+ * force when the guest computed the deadline. It is very slightly smaller, so
+ * the wait can end a hair early - which every caller of a timed wait already
+ * handles, because spurious wakeups exist.
+ */
+void port_time_scale_reverse(struct timespec *value)
+{
+    shift_timespec(value, -port_time_scale_offset_ns());
+}
+
+/*
+ * Which clock ids measure elapsed time. CLOCK_REALTIME is a date, and the two
+ * CPU-time clocks are not wall time at all - scaling either would be a lie
+ * about something nobody asked to go faster.
+ */
+static bool clock_measures_elapsed_time(int clk_id)
+{
+    switch (clk_id) {
+    case CLOCK_MONOTONIC:
+    case CLOCK_MONOTONIC_RAW:
+    case CLOCK_MONOTONIC_COARSE:
+    case CLOCK_BOOTTIME:
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -137,7 +206,8 @@ int bionic_clock_gettime(int clk_id, struct bionic_timespec *ts)
     struct timespec host;
     int rc = clock_gettime(clk_id, &host);
     if (rc == 0 && ts) {
-        add_nanoseconds(&host, test_extra_nanoseconds());
+        if (clock_measures_elapsed_time(clk_id))
+            port_time_scale_forward(&host);
         ts->tv_sec  = (int32_t)host.tv_sec;
         ts->tv_nsec = (int32_t)host.tv_nsec;
     }
@@ -155,12 +225,13 @@ int bionic_gettimeofday(struct bionic_timeval *tv, struct timezone *tz)
     struct timeval host;
     int rc = gettimeofday(tv ? &host : NULL, tz);
     if (rc == 0 && tv) {
-        int64_t adjusted = (int64_t)host.tv_usec * 1000
-                         + test_extra_nanoseconds();
-        host.tv_sec += adjusted / 1000000000LL;
-        host.tv_usec = (adjusted % 1000000000LL) / 1000;
-        tv->tv_sec  = (int32_t)host.tv_sec;
-        tv->tv_usec = (int32_t)host.tv_usec;
+        /* Scaled, unlike the other realtime paths here: see time_scale.h. */
+        struct timespec paced;
+        paced.tv_sec  = host.tv_sec;
+        paced.tv_nsec = (long)host.tv_usec * 1000;
+        port_time_scale_forward(&paced);
+        tv->tv_sec  = (int32_t)paced.tv_sec;
+        tv->tv_usec = (int32_t)(paced.tv_nsec / 1000);
     }
     return rc;
 }
@@ -173,13 +244,15 @@ int bionic_nanosleep(const struct bionic_timespec *req, struct bionic_timespec *
 
     host_req.tv_sec  = req->tv_sec;
     host_req.tv_nsec = req->tv_nsec;
-    double scale = test_time_scale();
+
+    /* A sleep is a duration, not an instant, so it divides rather than shifts:
+     * the guest asked to be woken after N of *its* nanoseconds. */
+    const double scale = port_time_scale();
     if (scale > 1.0) {
-        int64_t total = (int64_t)host_req.tv_sec * 1000000000LL
-                      + host_req.tv_nsec;
-        total = (int64_t)((double)total / scale);
-        host_req.tv_sec = total / 1000000000LL;
-        host_req.tv_nsec = total % 1000000000LL;
+        const int64_t total = (int64_t)((double)((int64_t)host_req.tv_sec * 1000000000LL
+                                                 + host_req.tv_nsec) / scale);
+        host_req.tv_sec  = (time_t)(total / 1000000000LL);
+        host_req.tv_nsec = (long)(total % 1000000000LL);
     }
 
     int rc = nanosleep(&host_req, &host_rem);
@@ -192,8 +265,9 @@ int bionic_nanosleep(const struct bionic_timespec *req, struct bionic_timespec *
 
 bionic_time_t bionic_time(bionic_time_t *out)
 {
-    bionic_time_t now = (bionic_time_t)(time(NULL)
-        + test_extra_nanoseconds() / 1000000000LL);
+    /* Unscaled, unlike the old DEADSPACE_TEST_TIME_SCALE path that added the
+     * offset here: this is the clock a save file's timestamp comes from. */
+    bionic_time_t now = (bionic_time_t)time(NULL);
     if (out)
         *out = now;
     return now;

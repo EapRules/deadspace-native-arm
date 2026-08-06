@@ -51,6 +51,7 @@
 #include "jni.h"
 #include "classes/media_AudioTrack.h"
 
+#include "app_exit.h"
 #include "crash.h"
 #include "cursor_draw.h"
 #include "emulator_control.h"
@@ -60,6 +61,7 @@
 #include "input_bridge.h"
 #include "patch.h"
 #include "trace.h"
+#include "viewport_scale.h"
 
 extern "C" long android_io_assets_opened(void);
 extern "C" long android_gl_textures_uploaded(void);
@@ -90,11 +92,6 @@ static const char *kNativeLibDir = "lib/armeabi";
  * exercise. */
 static const int kWidth  = 640;
 static const int kHeight = 480;
-
-/* Defined in symtab_glprobe.cpp: maps the engine's fixed logical panel onto the
- * device's real drawable (letterbox/stretch), identity on a matching panel. */
-extern "C" void viewport_scale_init(int phys_w, int phys_h,
-                                    int log_w, int log_h);
 
 /*
  * Walk the module's dynamic symbol table and name every import that nothing
@@ -507,6 +504,16 @@ int main(int argc, char **argv)
             if (!android_input_event(&ev))
                 goto done;
         }
+
+        /*
+         * The game's own exit request, checked next to the event drain rather
+         * than trusted to it: android_app_request_exit() pushes SDL_QUIT, but
+         * a full queue drops it, and a dropped exit is the freeze all over
+         * again. Read before the draw, so the frame after finish() is never
+         * issued against a world the engine has already released.
+         */
+        if (android_app_exit_requested())
+            goto done;
 
         if (!emulator_control_tick(frames))
             goto done;

@@ -44,6 +44,7 @@
 #include <unistd.h>
 
 #include <time.h>
+#include "time_scale.h"
 #include "trace.h"
 #include "so_util.h"
 #include "thunk_gen.h"
@@ -719,6 +720,12 @@ int bionic_pthread_cond_timedwait(pthread_cond_t **cnd, BIONIC_pthread_mutex_t *
     struct timespec ts;
     ts.tv_sec  = (time_t)abs->tv_sec;
     ts.tv_nsec = (long)abs->tv_nsec;
+    /* The guest built this deadline from a clock the time-scale shim may be
+     * running fast, so it sits in the host's future by the whole accumulated
+     * offset. Without the inverse the wait gets longer the longer the process
+     * has been up, and a timed wait that never times out is indistinguishable
+     * from a deadlock. A no-op unless the scale is set; see time_scale.h. */
+    port_time_scale_reverse(&ts);
     return pthread_cond_timedwait(*cnd, host, &ts);
 }
 

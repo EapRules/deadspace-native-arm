@@ -39,6 +39,7 @@
 #include "so_util.h"
 #include "thunk_gen.h"
 #include "trace.h"
+#include "viewport_scale.h"
 
 /* Written by the game's thread, read by the loader's. */
 static std::atomic<int> g_shaders_ok(0);
@@ -581,6 +582,7 @@ enum { SCALE_FIT = 0, SCALE_STRETCH = 1, SCALE_INTEGER = 2 };
 
 static int     g_scale_active = 0;
 static int     g_log_w = 640, g_log_h = 480;   /* engine's logical panel        */
+static int     g_phys_w = 0, g_phys_h = 0;     /* the real drawable             */
 static GLint   g_dst_x = 0, g_dst_y = 0;       /* full-screen rect on the panel */
 static GLsizei g_dst_w = 0, g_dst_h = 0;
 static float   g_scale_x = 1.0f, g_scale_y = 1.0f;
@@ -599,6 +601,8 @@ extern "C" void viewport_scale_init(int phys_w, int phys_h,
 
     phys_w = glprobe_env_int("DEADSPACE_PANEL_W", phys_w);
     phys_h = glprobe_env_int("DEADSPACE_PANEL_H", phys_h);
+    g_phys_w = phys_w;
+    g_phys_h = phys_h;
 
     /* No panel info, or the panel already matches the logical size: pass every
      * call through untouched. This is the R36S path - identity, zero cost. */
@@ -640,6 +644,37 @@ extern "C" void viewport_scale_init(int phys_w, int phys_h,
           mode == SCALE_INTEGER ? "integer" : "fit",
           phys_w, phys_h, g_log_w, g_log_h,
           g_dst_x, g_dst_y, g_dst_w, g_dst_h);
+}
+
+/*
+ * The same affine the scissor path applies, for the port's own overlay.
+ *
+ * The software cursor lives in the engine's logical space - input_bridge.cpp
+ * clamps it to 0..639 x 0..479 because that is what the touch events must
+ * carry - but it is painted straight into the physical framebuffer. Without
+ * this the arrow could only reach the logical rectangle in the corner of a
+ * larger panel (GitHub issue #5, dArkOS at 1024x768).
+ *
+ * Y is top-left-origin here, unlike glScissor's bottom-left, so the offset is
+ * the letterbox bar above the content rather than the one below it.
+ */
+extern "C" void viewport_scale_map(float *x, float *y)
+{
+    if (!g_scale_active)
+        return;
+    if (x)
+        *x = (float)g_dst_x + *x * g_scale_x;
+    if (y)
+        *y = (float)(g_phys_h - g_dst_y - g_dst_h) + *y * g_scale_y;
+}
+
+extern "C" int viewport_scale_factor(void)
+{
+    if (!g_scale_active)
+        return 1;
+    float s = g_scale_x < g_scale_y ? g_scale_x : g_scale_y;
+    int factor = (int)(s + 0.5f);
+    return factor < 1 ? 1 : factor;
 }
 
 /* The engine's one full-screen viewport, the only one we remap. */

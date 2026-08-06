@@ -77,6 +77,7 @@
 
 #include "so_util.h"
 #include "thunk_gen.h"
+#include "time_scale.h"
 #include "trace.h"
 
 extern "C" {
@@ -203,6 +204,8 @@ int bionic_sem_timedwait(struct BIONIC_sem_t *s, const struct bionic_timespec *a
     struct timespec deadline;
     deadline.tv_sec  = (time_t)abs->tv_sec;
     deadline.tv_nsec = (long)abs->tv_nsec;
+    /* Same inverse as pthread_cond_timedwait, same reason: see time_scale.h. */
+    port_time_scale_reverse(&deadline);
     return sem_timedwait(host, &deadline);
 }
 

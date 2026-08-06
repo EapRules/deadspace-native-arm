@@ -238,15 +238,29 @@ static void trigger_changed(bool left, Sint16 value)
  * and explicitly documents that a pad cannot navigate them. R36S has no touch
  * panel, so the d-pad drives this software cursor and physical A taps it.
  *
- * The cursor starts visible for the title/menu. Moving either analog stick
- * means gameplay and dismisses it; L3 brings it back when a menu is opened.
+ * The cursor starts visible for the title/menu, because the first screen the
+ * game shows is one of those touch-only menus and a fresh player has nothing
+ * else to click it with. Moving either analog stick means gameplay and
+ * dismisses it; Start and L3/R3 bring it back when a menu is opened.
+ * DEADSPACE_CURSOR_HIDDEN=1 boots without it.
  */
 static const int kCursorPointerId = 3;
 static const float kCursorSpeed = 420.0f;
+/*
+ * How far a stick has to travel before the *first* auto-hide is allowed.
+ * Opening a controller makes SDL report its resting axis values, and a worn
+ * pad can rest past the movement deadzone - which used to hide the boot cursor
+ * within a frame of it appearing, leaving the title menu unclickable until the
+ * player found Start. Deliberate movement clears half deflection; drift does
+ * not. Once the player has genuinely moved a stick the gate stays open and
+ * auto-hide behaves exactly as before.
+ */
+static const float kCursorAutohideIntent = 0.5f;
 static float g_cursor_x = -1.0f, g_cursor_y = -1.0f;
 static int g_cursor_dx = 0, g_cursor_dy = 0;
 static bool g_cursor_visible = false;
 static bool g_cursor_down = false;
+static bool g_cursor_autohide_armed = false;
 static Uint32 g_cursor_last_ms = 0;
 
 static bool g_autopilot = false;
@@ -484,8 +498,16 @@ static void update_sticks(void)
 
     bool left_now = lx != 0.0f || ly != 0.0f;
     bool right_now = rx != 0.0f || ry != 0.0f;
-    if (left_now || right_now)
-        cursor_hide();
+    if (left_now || right_now) {
+        if (!g_cursor_autohide_armed &&
+            (fabsf(lx) > kCursorAutohideIntent ||
+             fabsf(ly) > kCursorAutohideIntent ||
+             fabsf(rx) > kCursorAutohideIntent ||
+             fabsf(ry) > kCursorAutohideIntent))
+            g_cursor_autohide_armed = true;
+        if (g_cursor_autohide_armed)
+            cursor_hide();
+    }
 
     if (left_now && !g_left_active)
         send_pointer(ID_RAW_POINTER_DOWN, MODULE_TOUCH_SCREEN, 1,
@@ -600,7 +622,16 @@ void android_input_init(so_module *mod, JNIEnv *env, int width, int height)
           g_autopilot ? (g_autopilot_visual ? " autopilot=visual" :
                          (g_autopilot_fast ? " autopilot=fast" : " autopilot=on")) : "");
 
-    cursor_show();
+    /* Visible from the first frame: the game boots straight into a touch-only
+     * menu. The escape hatch is for anyone who would rather have the screen
+     * clean and press Start when they need the pointer. */
+    const char *hidden = getenv("DEADSPACE_CURSOR_HIDDEN");
+    if (hidden && *hidden && strcmp(hidden, "0") != 0) {
+        g_cursor_autohide_armed = true;
+        trace("input: menu cursor starts hidden (DEADSPACE_CURSOR_HIDDEN)");
+    } else {
+        cursor_show();
+    }
     trace("input: menus use d-pad cursor + physical A tap; L3/R3 toggle cursor; "
           "Start restores it");
     trace("input: L2 simulates weapon tilt; R2 simulates Zero-G motion");
@@ -636,6 +667,9 @@ bool android_input_event(const SDL_Event *event)
         if (button == SDL_CONTROLLER_BUTTON_LEFTSTICK ||
             button == SDL_CONTROLLER_BUTTON_RIGHTSTICK) {
             if (down) {
+                /* An explicit toggle means the player is driving; the boot
+                 * gate on auto-hide has done its job. */
+                g_cursor_autohide_armed = true;
                 if (g_cursor_visible)
                     cursor_hide();
                 else
@@ -652,8 +686,10 @@ bool android_input_event(const SDL_Event *event)
          * whose stick-click buttons are not exposed by their SDL mapping.
          */
         if (button == SDL_CONTROLLER_BUTTON_START && down &&
-            !g_cursor_visible)
+            !g_cursor_visible) {
+            g_cursor_autohide_armed = true;
             cursor_show();
+        }
 
         if (g_cursor_visible) {
             switch (button) {

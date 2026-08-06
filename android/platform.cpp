@@ -18,6 +18,7 @@
 #include <SDL2/SDL.h>
 
 #include "android_api.h"
+#include "app_exit.h"
 #include "trace.h"
 
 /* Android keycodes the game cares about (from android/keycodes.h). */
@@ -1148,18 +1149,21 @@ extern "C" float AMotionEvent_getHistoricalAxisValue(const AInputEvent *e, int32
 /* ------------------------------------------------------------------ *
  * native_activity.h — the one call the game makes on itself.
  * ------------------------------------------------------------------ */
-static bool g_finished = false;
-
 /* The game calls this to end the activity (quit from its own menu, or a fatal
- * error inside the engine). Android tears the process down afterwards; here it
- * raises a flag the main loop polls, so shutdown stays on our thread. */
+ * error inside the engine). Android tears the process down afterwards; here the
+ * request is recorded and the frame loop consumes it, so shutdown stays on our
+ * thread - see app_exit.h. Routing it there rather than to a flag of our own is
+ * what gives this path the SDL_QUIT wakeup and the trace line: the flag it used
+ * to raise had no reader at all, so a game that left through NativeActivity
+ * instead of MainActivity.finish() froze exactly as if nothing had happened. */
 extern "C" void ANativeActivity_finish(ANativeActivity *activity)
 {
     (void)activity;
-    g_finished = true;
+    android_app_request_exit("ANativeActivity_finish()");
 }
 
+/* The same question under the platform layer's own name. */
 extern "C" bool android_platform_finished(void)
 {
-    return g_finished;
+    return android_app_exit_requested();
 }

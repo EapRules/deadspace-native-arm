@@ -25,7 +25,7 @@ import time
 import uuid
 import zipfile
 
-VERSION = "0.4.2"
+VERSION = "0.4.3"
 FORMAT_VERSION = 1
 CHUNK_SIZE = 1 << 20
 DEFAULT_SAFETY_BYTES = 128 << 20
@@ -2295,7 +2295,8 @@ def adopt_existing(recipe, game_dir, marker_path, digests, logger, abi_override,
                     raise ValidationError("%s is not installed" % entry["path"])
             validate_output_checks(game_dir, recipe, abi, digests, logger)
         except ValidationError as error:
-            logger.log("cannot adopt for %s: %s" % (abi, error))
+            logger.log("no adoptable install for %s (%s); this is normal on "
+                       "a fresh install, continuing with the import" % (abi, error))
             continue
 
         items = []

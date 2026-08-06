@@ -29,14 +29,23 @@ static void decode_color_block(const std::uint8_t *src,
     const std::uint32_t c1 = static_cast<std::uint32_t>(src[2]) |
                              (static_cast<std::uint32_t>(src[3]) << 8);
 
+    /*
+     * Endpoint fields, low bits first: c0 is RGB555 (bit 15 selects the mode)
+     * and c1 is RGB565, both with red in the high bits, exactly like DXT. The
+     * channel index below is the RGBA output byte, so red must come from the
+     * top of the word. Reading it from the bottom instead - which is what the
+     * BGRA-writing reference decoder this was adapted from does, correctly for
+     * its own output order - swaps red and blue and turns every warm texture
+     * cold. That was the reported bluish tint on the ATC donor.
+     */
     std::uint8_t colors[4][4] = {};
     if ((c0 & 0x8000u) == 0) {
-        colors[0][0] = expand((c0 >> 0) & 0x1f, 5);
+        colors[0][0] = expand((c0 >> 10) & 0x1f, 5);
         colors[0][1] = expand((c0 >> 5) & 0x1f, 5);
-        colors[0][2] = expand((c0 >> 10) & 0x1f, 5);
-        colors[3][0] = expand((c1 >> 0) & 0x1f, 5);
+        colors[0][2] = expand((c0 >> 0) & 0x1f, 5);
+        colors[3][0] = expand((c1 >> 11) & 0x1f, 5);
         colors[3][1] = expand((c1 >> 5) & 0x3f, 6);
-        colors[3][2] = expand((c1 >> 11) & 0x1f, 5);
+        colors[3][2] = expand((c1 >> 0) & 0x1f, 5);
         for (int channel = 0; channel < 3; ++channel) {
             colors[1][channel] = static_cast<std::uint8_t>(
                 (5 * colors[0][channel] + 3 * colors[3][channel]) / 8);
@@ -46,12 +55,12 @@ static void decode_color_block(const std::uint8_t *src,
     } else {
         /* ATC's alternate mode uses black, a clamped subtraction, and two
          * endpoints instead of the two interpolated colors. */
-        colors[2][0] = expand((c0 >> 0) & 0x1f, 5);
+        colors[2][0] = expand((c0 >> 10) & 0x1f, 5);
         colors[2][1] = expand((c0 >> 5) & 0x1f, 5);
-        colors[2][2] = expand((c0 >> 10) & 0x1f, 5);
-        colors[3][0] = expand((c1 >> 0) & 0x1f, 5);
+        colors[2][2] = expand((c0 >> 0) & 0x1f, 5);
+        colors[3][0] = expand((c1 >> 11) & 0x1f, 5);
         colors[3][1] = expand((c1 >> 5) & 0x3f, 6);
-        colors[3][2] = expand((c1 >> 11) & 0x1f, 5);
+        colors[3][2] = expand((c1 >> 0) & 0x1f, 5);
         for (int channel = 0; channel < 3; ++channel) {
             colors[1][channel] = static_cast<std::uint8_t>(std::max(
                 0, static_cast<int>(colors[2][channel]) -

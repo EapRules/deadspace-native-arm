@@ -34,6 +34,9 @@ COMPAT_ROOT = RUNTIME_DIR / "compatibility"
 
 _process: subprocess.Popen[bytes] | None = None
 _log_handle: Any = None
+
+# Applied at the next start_emulator, never to a running one: see set_time_scale.
+_time_scale: float = 1.0
 _compat_process: subprocess.Popen[bytes] | None = None
 _compat_log_handle: Any = None
 _compat_run_id: str | None = None
@@ -77,6 +80,31 @@ def _wait_until(predicate: Any, timeout: float, interval: float = 0.1) -> bool:
     return False
 
 
+def set_time_scale(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Run the next start_emulator with the guest's clock accelerated.
+
+    A setting for the *next* start, not a runtime knob. The loader reads the
+    variable once and anchors an epoch on the first clock call, so there is no
+    honest way to change it mid-run: raising it later would be a discontinuity
+    in a clock the engine believes is monotonic. run.sh gets it through the
+    environment of the process this server spawns.
+    """
+    global _time_scale
+    scale = float(arguments["scale"])
+    if not 1.0 <= scale <= 64.0:
+        raise ValueError(f"time scale {scale} is outside 1..64")
+    _time_scale = scale
+    if scale == 1.0:
+        return _text("Time scale reset to 1x from the next start_emulator.")
+    return _text(
+        f"Time scale {scale:g}x from the next start_emulator. The guest's "
+        "monotonic clock and gettimeofday run fast, so splashes and fades cost "
+        f"{scale:g}x fewer real seconds; CLOCK_REALTIME and localtime do not "
+        "move, so save timestamps stay honest. Development only - it is never "
+        "set in a released port."
+    )
+
+
 def start_emulator(arguments: dict[str, Any]) -> dict[str, Any]:
     global _process, _log_handle
     if _running():
@@ -93,6 +121,8 @@ def start_emulator(arguments: dict[str, Any]) -> dict[str, Any]:
     _log_handle = LOG.open("wb")
     env = os.environ.copy()
     env["DEADSPACE_CONTROL_DIR"] = str(RUNTIME_DIR)
+    if _time_scale > 1.0:
+        env["DEADSPACE_TIME_SCALE"] = f"{_time_scale:g}"
     if arguments.get("game_dir"):
         env["DEADSPACE_GAMEDIR"] = str(Path(arguments["game_dir"]).expanduser().resolve())
     if arguments.get("gl_diag") or arguments.get("mali_compat"):
@@ -451,9 +481,31 @@ TOOLS: list[dict[str, Any]] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "set_time_scale",
+        "description": (
+            "Set how much faster than real time the guest's clock runs, from the "
+            "NEXT start_emulator (it cannot change during a run: the loader reads "
+            "it once and anchors an epoch). Under llvmpipe the emulator draws two "
+            "or three frames a second while the engine paces splashes, fades and "
+            "cinematics off the wall clock, so boot-to-title costs tens of "
+            "minutes; 4x-8x cuts that proportionally. Monotonic clocks and "
+            "gettimeofday scale; CLOCK_REALTIME, time() and localtime() do not. "
+            "Development only, and never set in a released port."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "scale": {"type": "number", "minimum": 1.0, "maximum": 64.0}
+            },
+            "required": ["scale"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 HANDLERS = {
+    "set_time_scale": set_time_scale,
     "start_emulator": start_emulator,
     "stop_emulator": stop_emulator,
     "emulator_status": emulator_status,

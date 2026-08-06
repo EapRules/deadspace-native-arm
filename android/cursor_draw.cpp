@@ -17,6 +17,7 @@
 
 #include "cursor_draw.h"
 #include "input_bridge.h"
+#include "viewport_scale.h"
 
 static uintptr_t find_gles1_function(const char *name)
 {
@@ -93,8 +94,10 @@ static void clear_rect(CursorGl &gl, int x, int y, int width, int height,
     gl.clear(GL_COLOR_BUFFER_BIT);
 }
 
+/* Each pattern cell becomes a scale x scale block, so the arrow keeps its size
+ * relative to the content on a panel the engine's output was blown up onto. */
 static void draw_pattern_runs(CursorGl &gl, const char *const *pattern,
-                              int rows, char pixel, int x, int y,
+                              int rows, char pixel, int x, int y, int scale,
                               int fb_width, int fb_height)
 {
     for (int row = 0; row < rows; row++) {
@@ -107,8 +110,8 @@ static void draw_pattern_runs(CursorGl &gl, const char *const *pattern,
             int end = begin + 1;
             while (line[end] == pixel)
                 end++;
-            clear_rect(gl, x + begin, y - row, end - begin, 1,
-                       fb_width, fb_height);
+            clear_rect(gl, x + begin * scale, y - row * scale,
+                       (end - begin) * scale, scale, fb_width, fb_height);
             begin = end;
         }
     }
@@ -141,6 +144,13 @@ extern "C" void android_cursor_draw(int fb_width, int fb_height)
     gl.enable(GL_SCISSOR_TEST);
     gl.color_mask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
+    /* The bridge reports game space, because that is what the touch events it
+     * synthesises must carry. Here we are painting physical pixels, so the
+     * viewport's own transform has to be applied - otherwise the arrow is
+     * stuck inside the logical rectangle on a scaled panel. */
+    viewport_scale_map(&cx, &cy);
+    const int scale = viewport_scale_factor();
+
     int x = (int)cx;
     int y = fb_height - 1 - (int)cy;
 
@@ -171,10 +181,10 @@ extern "C" void android_cursor_draw(int fb_width, int fb_height)
     const int pointer_rows = sizeof(pointer) / sizeof(pointer[0]);
 
     gl.clear_color(0.0f, 0.0f, 0.0f, 1.0f);
-    draw_pattern_runs(gl, pointer, pointer_rows, '#', x, y,
+    draw_pattern_runs(gl, pointer, pointer_rows, '#', x, y, scale,
                       fb_width, fb_height);
     gl.clear_color(0.82f, 0.96f, 1.0f, 1.0f);
-    draw_pattern_runs(gl, pointer, pointer_rows, 'o', x, y,
+    draw_pattern_runs(gl, pointer, pointer_rows, 'o', x, y, scale,
                       fb_width, fb_height);
 
     gl.clear_color(previous_clear[0], previous_clear[1],

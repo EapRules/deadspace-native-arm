@@ -11,12 +11,18 @@ set -euo pipefail
 PORT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GAME_DIR="${DEADSPACE_GAMEDIR:-$PORT_DIR/../NeededFiles/data/deadspace}"
 CONTROL_DIR="${DEADSPACE_CONTROL_DIR:-$PORT_DIR/emulator/runtime}"
+# Development clock acceleration; see src/time_scale.h. Unset means 1x.
+TIME_SCALE="${DEADSPACE_TIME_SCALE:-}"
 IMAGE="${DEADSPACE_BUILD_IMAGE:-deadspace-build}"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --game-dir)
             GAME_DIR="${2:?--game-dir needs a path}"
+            shift 2
+            ;;
+        --time-scale)
+            TIME_SCALE="${2:?--time-scale needs a number}"
             shift 2
             ;;
         --control-dir)
@@ -29,6 +35,29 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+# Docker Desktop on macOS does not share /tmp with its VM coherently: the bind
+# mount is accepted, the container writes into it, and the host sees an empty
+# directory. Every byte of the control channel - commands, status.json,
+# screenshots - is a file in this directory, so the symptom is an emulator that
+# starts, runs, and never becomes ready, with nothing anywhere saying why. It
+# cost an afternoon once; refusing is cheaper than diagnosing it twice.
+if [ "$(uname -s)" = "Darwin" ]; then
+    _probe="$CONTROL_DIR"
+    while [ -n "$_probe" ] && [ ! -d "$_probe" ]; do
+        _probe="$(dirname "$_probe")"
+    done
+    _resolved="$(cd "$_probe" 2>/dev/null && pwd -P || echo "$CONTROL_DIR")"
+    case "$_resolved" in
+        /tmp|/tmp/*|/private/tmp|/private/tmp/*)
+            echo "refusing to use a control dir under /tmp: $CONTROL_DIR" >&2
+            echo "  Docker Desktop on macOS does not share /tmp with the container," >&2
+            echo "  so the emulator would write status files this side never sees." >&2
+            echo "  Use a path inside the port tree, e.g. $PORT_DIR/emulator/runtime." >&2
+            exit 2
+            ;;
+    esac
+fi
 
 if [ ! -f "$GAME_DIR/lib/armeabi/libEAMGameDeadSpace.so" ]; then
     echo "game tree not found at $GAME_DIR" >&2
@@ -64,6 +93,7 @@ exec docker run --rm \
     -e DEADSPACE_FAST_FORWARD="${DEADSPACE_FAST_FORWARD:-}" \
     -e DEADSPACE_NO_VFP_PATCH="${DEADSPACE_NO_VFP_PATCH:-}" \
     -e DEADSPACE_VFP_SELFTEST="${DEADSPACE_VFP_SELFTEST:-}" \
+    -e DEADSPACE_TIME_SCALE="$TIME_SCALE" \
     -e DEADSPACE_CONTROL_DIR=/control \
     -e DEADSPACE_GL_DIAG="${DEADSPACE_GL_DIAG:-}" \
     -e DEADSPACE_DONOR_PROFILE="${DEADSPACE_DONOR_PROFILE:-}" \
