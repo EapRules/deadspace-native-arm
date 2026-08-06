@@ -1,8 +1,14 @@
+# The user's own APK: never redistributed, never committed.
+*.apk
 build/
-*.core
+# The game's writable storage (savegames, caches). Created at runtime; the
+# port's .sh points DEADSPACE_DATA_DIR at the PortMaster data directory.
+gamedata/
 harness/results/
+harness/control/*.armhf
 emulator/runtime/
+emulator/__pycache__/
+
+# qemu-user drops core files in the working directory on a guest abort.
+qemu_*.core
 __pycache__/
-*.pyc
-.DS_Store
-._*

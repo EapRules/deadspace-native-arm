@@ -18,5 +18,11 @@ The known Vita-ready deadspace.zip is also supported. It contains the main
 campaign but omits optional Survival, Burst Rifle and ~2x UI data. README.md
 records its exact archive identity and the difference from a complete donor.
 
+IMPORTANT: the tested file named deadspace-full.zip with SHA256 beginning
+48d12821 uses ETC1 textures. It is not the original Full PVRTC donor and is not
+supported yet; its 3D models render black. The supported Full original normally
+arrives as a 7z. Extract that 7z on your computer and copy the folder containing
+assets/ and lib/ under gamedata/donor/. eapx cannot read 7z directly.
+
 Do not place the PortMaster release zip here. That zip belongs in PortMaster's
 autoinstall folder. See README.md for the complete installation instructions.

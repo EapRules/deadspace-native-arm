@@ -47,6 +47,13 @@ static std::atomic<int> g_programs_ok(0);
 static std::atomic<int> g_programs_failed(0);
 static std::atomic<long> g_draws(0);
 static std::atomic<long> g_textures(0);
+static std::atomic<long> g_rgba_uploaded(0);
+static std::atomic<long> g_subimages_uploaded(0);
+static std::atomic<long> g_atc_decoded(0);
+static std::atomic<long> g_pvrtc_native(0);
+static std::atomic<long> g_pvrtc_decoded(0);
+static std::atomic<long> g_compressed_passthrough(0);
+static std::atomic<long> g_decode_failed(0);
 
 extern DynLibFunction symtable_gles1[];
 
@@ -163,13 +170,103 @@ extern "C" void probe_glTexImage2D(GLenum target, GLint level,
                                    GLenum type, const void *pixels)
 {
     g_textures++;
+    g_rgba_uploaded++;
     using TexImage2D = void (*)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint,
                                 GLenum, GLenum, const void *);
     static TexImage2D upload =
         (TexImage2D)find_gles1_function("glTexImage2D");
-    if (upload)
+    static int diagnostic_lines = 0;
+    if (gl_diag_enabled()) {
+        gl_diag_before("glTexImage2D");
+        if (diagnostic_lines++ < 128) {
+            unsigned int sample = 2166136261u;
+            if (pixels) {
+                const unsigned char *bytes =
+                    static_cast<const unsigned char *>(pixels);
+                size_t bytes_per_pixel = 4;
+                if (type == GL_UNSIGNED_SHORT_4_4_4_4 ||
+                    type == GL_UNSIGNED_SHORT_5_5_5_1 ||
+                    type == GL_UNSIGNED_SHORT_5_6_5)
+                    bytes_per_pixel = 2;
+                else if (format == GL_RGB)
+                    bytes_per_pixel = 3;
+                else if (format == GL_LUMINANCE || format == GL_ALPHA)
+                    bytes_per_pixel = 1;
+                else if (format == GL_LUMINANCE_ALPHA)
+                    bytes_per_pixel = 2;
+                const size_t available = width > 0 && height > 0
+                    ? static_cast<size_t>(width) *
+                      static_cast<size_t>(height) * bytes_per_pixel : 0;
+                const size_t sample_size = std::min<size_t>(64, available);
+                for (size_t i = 0; i < sample_size; i++)
+                    sample = (sample ^ bytes[i]) * 16777619u;
+            }
+            trace("GLDIAG: texture upload target=0x%04x level=%d "
+                  "internal=0x%04x format=0x%04x type=0x%04x size=%dx%d "
+                  "border=%d pixels=%p sample=%08x",
+                  target, level, internalformat, format, type, width, height,
+                  border, pixels, sample);
+        }
+    }
+    if (upload) {
         upload(target, level, internalformat, width, height, border,
                format, type, pixels);
+        if (gl_diag_enabled())
+            gl_diag_after("glTexImage2D");
+    }
+}
+
+extern "C" void probe_glTexSubImage2D(GLenum target, GLint level,
+                                      GLint xoffset, GLint yoffset,
+                                      GLsizei width, GLsizei height,
+                                      GLenum format, GLenum type,
+                                      const void *pixels)
+{
+    using TexSubImage2D = void (*)(GLenum, GLint, GLint, GLint, GLsizei,
+                                   GLsizei, GLenum, GLenum, const void *);
+    static TexSubImage2D upload =
+        (TexSubImage2D)find_gles1_function("glTexSubImage2D");
+    static int diagnostic_lines = 0;
+    g_subimages_uploaded++;
+
+    if (gl_diag_enabled()) {
+        gl_diag_before("glTexSubImage2D");
+        if (diagnostic_lines++ < 128) {
+            unsigned int sample = 2166136261u;
+            if (pixels) {
+                const unsigned char *bytes =
+                    static_cast<const unsigned char *>(pixels);
+                size_t bytes_per_pixel = 4;
+                if (type == GL_UNSIGNED_SHORT_4_4_4_4 ||
+                    type == GL_UNSIGNED_SHORT_5_5_5_1 ||
+                    type == GL_UNSIGNED_SHORT_5_6_5)
+                    bytes_per_pixel = 2;
+                else if (format == GL_RGB)
+                    bytes_per_pixel = 3;
+                else if (format == GL_LUMINANCE || format == GL_ALPHA)
+                    bytes_per_pixel = 1;
+                else if (format == GL_LUMINANCE_ALPHA)
+                    bytes_per_pixel = 2;
+                const size_t available = width > 0 && height > 0
+                    ? static_cast<size_t>(width) *
+                      static_cast<size_t>(height) * bytes_per_pixel : 0;
+                const size_t sample_size = std::min<size_t>(64, available);
+                for (size_t i = 0; i < sample_size; i++)
+                    sample = (sample ^ bytes[i]) * 16777619u;
+            }
+            trace("GLDIAG: texture subupload target=0x%04x level=%d "
+                  "offset=%d,%d format=0x%04x type=0x%04x size=%dx%d "
+                  "pixels=%p sample=%08x",
+                  target, level, xoffset, yoffset, format, type, width, height,
+                  pixels, sample);
+        }
+    }
+    if (upload) {
+        upload(target, level, xoffset, yoffset, width, height, format, type,
+               pixels);
+        if (gl_diag_enabled())
+            gl_diag_after("glTexSubImage2D");
+    }
 }
 
 static bool extension_present(const char *extensions, const char *wanted)
@@ -202,25 +299,6 @@ static bool driver_supports_pvrtc(void)
     supported = extension_present(
         extensions, "GL_IMG_texture_compression_pvrtc") ? 1 : 0;
     trace("PVRTC: native driver support %s; software fallback %s",
-          supported ? "present" : "absent",
-          supported ? "disabled" : "enabled");
-    return supported != 0;
-}
-
-static bool driver_supports_atc(void)
-{
-    static int supported = -1;
-    if (supported >= 0)
-        return supported != 0;
-
-    using GetString = const GLubyte *(*)(GLenum);
-    GetString get_string =
-        (GetString)SDL_GL_GetProcAddress("glGetString");
-    const char *extensions = get_string
-        ? (const char *)get_string(GL_EXTENSIONS) : NULL;
-    supported = extension_present(
-        extensions, "GL_AMD_compressed_ATC_texture") ? 1 : 0;
-    trace("ATC: native driver support %s; software fallback %s",
           supported ? "present" : "absent",
           supported ? "disabled" : "enabled");
     return supported != 0;
@@ -323,7 +401,7 @@ static bool decode_pvrtc(GLenum format, GLsizei width, GLsizei height,
         return false;
     }
 
-    if (opaque) {
+    if (opaque || getenv("DEADSPACE_PVRTC_FORCE_OPAQUE")) {
         for (size_t i = 3; i < rgba->size(); i += 4)
             (*rgba)[i] = 255;
     }
@@ -340,13 +418,27 @@ extern "C" void probe_glCompressedTexImage2D(
     using Upload =
         void (*)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum,
                  GLenum, const void *);
+    /* Preserve the original native compressed-upload entry point for PVRTC.
+     * ATC/RGBA fallback uploads use the live GLES1 table below.  On Mali,
+     * routing the native PVRTC call through the thunk table changes the
+     * driver's texture state and produces black models in the Full donor. */
     static CompressedUpload compressed_upload =
         (CompressedUpload)SDL_GL_GetProcAddress("glCompressedTexImage2D");
-    static Upload upload =
-        (Upload)SDL_GL_GetProcAddress("glTexImage2D");
+    if (!compressed_upload)
+        compressed_upload =
+            (CompressedUpload)find_gles1_function("glCompressedTexImage2D");
+    static Upload upload = (Upload)SDL_GL_GetProcAddress("glTexImage2D");
+    if (!upload)
+        upload = (Upload)find_gles1_function("glTexImage2D");
     static int diagnostic_lines = 0;
     static int fallback_lines = 0;
+    static bool mali_compat_logged = false;
     g_textures++;
+
+    if (!mali_compat_logged && getenv("DEADSPACE_MALI_COMPAT")) {
+        trace("Mali compatibility diagnostics: GLES1 table upload resolution active");
+        mali_compat_logged = true;
+    }
 
     if (gl_diag_enabled()) {
         gl_diag_before("glCompressedTexImage2D");
@@ -360,12 +452,16 @@ extern "C" void probe_glCompressedTexImage2D(
 
     bool known_atc = false, ignored_explicit_alpha = false;
     known_atc = atc_format(internalformat, &ignored_explicit_alpha);
-    if (known_atc && !driver_supports_atc() && upload) {
+    /* ATC is always decoded on this port.  Some Mesa stacks advertise the
+     * extension but either reject the old AMD enum or sample it differently;
+     * the software result is deterministic on both the emulator and R36S. */
+    if (known_atc && upload) {
         std::vector<unsigned char> rgba;
         if (decode_atc(internalformat, width, height, image_size, data,
                        &rgba)) {
             upload(target, level, GL_RGBA, width, height, border,
                    GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+            g_atc_decoded++;
             if (fallback_lines++ < 16) {
                 trace("ATC: decoded level=%d format=0x%04x %dx%d "
                       "(%d compressed bytes -> %zu RGBA bytes)",
@@ -376,6 +472,7 @@ extern "C" void probe_glCompressedTexImage2D(
                 gl_diag_after("ATC fallback glTexImage2D");
             return;
         }
+        g_decode_failed++;
         trace("ATC: invalid upload; forwarding to driver for GL error "
               "(level=%d format=0x%04x %dx%d bytes=%d)",
               level, internalformat, width, height, image_size);
@@ -384,12 +481,18 @@ extern "C" void probe_glCompressedTexImage2D(
     bool known_pvrtc = false, ignored_two_bpp = false, ignored_opaque = false;
     known_pvrtc = pvrtc_format(internalformat, &ignored_two_bpp,
                               &ignored_opaque);
-    if (known_pvrtc && !driver_supports_pvrtc() && upload) {
+    /* Keep the original PVRTC path whenever the driver advertises IMG PVRTC.
+     * That is the path on which the original Full donor was proven on the
+     * R36S.  Software decoding is a capability fallback, never a donor-wide
+     * switch, and can be forced only for diagnostics. */
+    const bool force_pvrtc = getenv("DEADSPACE_PVRTC_SOFTWARE") != NULL;
+    if (known_pvrtc && (force_pvrtc || !driver_supports_pvrtc()) && upload) {
         std::vector<unsigned char> rgba;
         if (decode_pvrtc(internalformat, width, height, image_size, data,
                          &rgba)) {
             upload(target, level, GL_RGBA, width, height, border,
                    GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+            g_pvrtc_decoded++;
             if (fallback_lines++ < 16) {
                 trace("PVRTC: decoded level=%d format=0x%04x %dx%d "
                       "(%d compressed bytes -> %zu RGBA bytes)",
@@ -400,6 +503,7 @@ extern "C" void probe_glCompressedTexImage2D(
                 gl_diag_after("PVRTC fallback glTexImage2D");
             return;
         }
+        g_decode_failed++;
         trace("PVRTC: invalid upload; forwarding to driver for GL error "
               "(level=%d format=0x%04x %dx%d bytes=%d)",
               level, internalformat, width, height, image_size);
@@ -408,14 +512,146 @@ extern "C" void probe_glCompressedTexImage2D(
     if (compressed_upload) {
         compressed_upload(target, level, internalformat, width, height,
                           border, image_size, data);
+        if (known_pvrtc)
+            g_pvrtc_native++;
+        else
+            g_compressed_passthrough++;
+    } else {
+        g_decode_failed++;
+        trace("compressed upload dropped: no GLES1 entry point format=0x%04x",
+              internalformat);
     }
 
     if (gl_diag_enabled())
         gl_diag_after("glCompressedTexImage2D");
 }
 
+extern "C" void probe_glCompressedTexSubImage2D(
+    GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
+    GLsizei height, GLenum format, GLsizei image_size, const void *data)
+{
+    using CompressedSubUpload =
+        void (*)(GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum,
+                 GLsizei, const void *);
+    static CompressedSubUpload upload =
+        (CompressedSubUpload)find_gles1_function("glCompressedTexSubImage2D");
+    static int diagnostic_lines = 0;
+
+    if (gl_diag_enabled()) {
+        gl_diag_before("glCompressedTexSubImage2D");
+        if (diagnostic_lines++ < 128) {
+            trace("GLDIAG: compressed subupload target=0x%04x level=%d "
+                  "offset=%d,%d format=0x%04x size=%dx%d bytes=%d data=%p",
+                  target, level, xoffset, yoffset, format, width, height,
+                  image_size, data);
+        }
+    }
+    if (upload) {
+        upload(target, level, xoffset, yoffset, width, height, format,
+               image_size, data);
+        if (gl_diag_enabled())
+            gl_diag_after("glCompressedTexSubImage2D");
+    }
+}
+
 /*
- * Geometry diagnostics for real devices.
+ * Aspect-correct scaling to the device's real panel.
+ *
+ * The engine renders at one fixed logical size - the 640x480 the loader asks
+ * SDL for and hands to android_input_init - and issues a single full-screen
+ * glViewport at that size, with glScissor calls in the same space. On a device
+ * whose framebuffer already is that size (the R36S) nothing needs to change.
+ * On a larger panel (the R36H Pro Max is 1024x768) that viewport lands in the
+ * bottom-left corner and the rest of the panel stays black. We remap that one
+ * full-screen viewport onto the real drawable and apply the matching affine
+ * transform to scissor rectangles so clipped UI stays aligned; every other
+ * viewport - a render target of a different size - is left untouched, since
+ * that is exactly the call blind remapping would break.
+ *
+ * DEADSPACE_SCALE picks the policy:
+ *   fit      (default) keep the logical aspect, letterbox, no distortion
+ *   stretch  fill the panel, minor distortion
+ *   integer  largest whole-number fit, letterboxed
+ * The panel size comes from SDL_GL_GetDrawableSize (main.cpp calls the init);
+ * DEADSPACE_PANEL_W/H override it, both to force a size on a CFW that reports
+ * the wrong one and to exercise the path under the harness, which otherwise
+ * renders at the logical size and would only ever take the identity branch.
+ */
+enum { SCALE_FIT = 0, SCALE_STRETCH = 1, SCALE_INTEGER = 2 };
+
+static int     g_scale_active = 0;
+static int     g_log_w = 640, g_log_h = 480;   /* engine's logical panel        */
+static GLint   g_dst_x = 0, g_dst_y = 0;       /* full-screen rect on the panel */
+static GLsizei g_dst_w = 0, g_dst_h = 0;
+static float   g_scale_x = 1.0f, g_scale_y = 1.0f;
+
+static int glprobe_env_int(const char *key, int fallback)
+{
+    const char *v = getenv(key);
+    return (v && *v) ? atoi(v) : fallback;
+}
+
+extern "C" void viewport_scale_init(int phys_w, int phys_h,
+                                    int log_w, int log_h)
+{
+    g_log_w = log_w > 0 ? log_w : 640;
+    g_log_h = log_h > 0 ? log_h : 480;
+
+    phys_w = glprobe_env_int("DEADSPACE_PANEL_W", phys_w);
+    phys_h = glprobe_env_int("DEADSPACE_PANEL_H", phys_h);
+
+    /* No panel info, or the panel already matches the logical size: pass every
+     * call through untouched. This is the R36S path - identity, zero cost. */
+    if (phys_w <= 0 || phys_h <= 0 ||
+        (phys_w == g_log_w && phys_h == g_log_h)) {
+        g_scale_active = 0;
+        trace("viewport scale: identity (panel %dx%d, logical %dx%d)",
+              phys_w, phys_h, g_log_w, g_log_h);
+        return;
+    }
+
+    const char *m = getenv("DEADSPACE_SCALE");
+    int mode = SCALE_FIT;
+    if (m && !strcmp(m, "stretch"))      mode = SCALE_STRETCH;
+    else if (m && !strcmp(m, "integer")) mode = SCALE_INTEGER;
+
+    if (mode == SCALE_STRETCH) {
+        g_dst_x = 0; g_dst_y = 0;
+        g_dst_w = phys_w; g_dst_h = phys_h;
+    } else {
+        float sx = (float)phys_w / (float)g_log_w;
+        float sy = (float)phys_h / (float)g_log_h;
+        float s  = sx < sy ? sx : sy;          /* largest that fits          */
+        if (mode == SCALE_INTEGER) {
+            s = (float)(int)s;                 /* floor to a whole multiple  */
+            if (s < 1.0f) s = 1.0f;
+        }
+        g_dst_w = (GLsizei)(g_log_w * s + 0.5f);
+        g_dst_h = (GLsizei)(g_log_h * s + 0.5f);
+        g_dst_x = (phys_w - g_dst_w) / 2;
+        g_dst_y = (phys_h - g_dst_h) / 2;
+    }
+
+    g_scale_x = (float)g_dst_w / (float)g_log_w;
+    g_scale_y = (float)g_dst_h / (float)g_log_h;
+    g_scale_active = 1;
+    trace("viewport scale: %s panel=%dx%d logical=%dx%d -> dst=%d,%d %dx%d",
+          mode == SCALE_STRETCH ? "stretch" :
+          mode == SCALE_INTEGER ? "integer" : "fit",
+          phys_w, phys_h, g_log_w, g_log_h,
+          g_dst_x, g_dst_y, g_dst_w, g_dst_h);
+}
+
+/* The engine's one full-screen viewport, the only one we remap. */
+static inline int is_fullscreen_viewport(GLint x, GLint y,
+                                         GLsizei w, GLsizei h)
+{
+    return g_scale_active && x == 0 && y == 0 &&
+           w == g_log_w && h == g_log_h;
+}
+
+/*
+ * Geometry diagnostics for real devices, now also the scaling seam.
  *
  * A black/cropped frame can be a correct draw into the wrong rectangle.
  * Logging only changes, and only the first few, keeps LOADER_TRACE useful
@@ -427,6 +663,11 @@ extern "C" void probe_glViewport(GLint x, GLint y, GLsizei width,
     using Viewport = void (*)(GLint, GLint, GLsizei, GLsizei);
     static Viewport viewport =
         (Viewport)find_gles1_function("glViewport");
+
+    if (is_fullscreen_viewport(x, y, width, height)) {
+        x = g_dst_x; y = g_dst_y; width = g_dst_w; height = g_dst_h;
+    }
+
     static GLint last_x = -1, last_y = -1;
     static GLsizei last_w = -1, last_h = -1;
     static int lines = 0;
@@ -448,6 +689,17 @@ extern "C" void probe_glScissor(GLint x, GLint y, GLsizei width,
     using Scissor = void (*)(GLint, GLint, GLsizei, GLsizei);
     static Scissor scissor =
         (Scissor)find_gles1_function("glScissor");
+
+    /* Every scissor is in the logical panel's space (the engine uses one
+     * viewport), so the same affine transform keeps clipped UI aligned with
+     * the scaled content. Identity when scaling is off. */
+    if (g_scale_active) {
+        x = g_dst_x + (GLint)(x * g_scale_x + 0.5f);
+        y = g_dst_y + (GLint)(y * g_scale_y + 0.5f);
+        width  = (GLsizei)(width  * g_scale_x + 0.5f);
+        height = (GLsizei)(height * g_scale_y + 0.5f);
+    }
+
     static GLint last_x = -1, last_y = -1;
     static GLsizei last_w = -1, last_h = -1;
     static int lines = 0;
@@ -465,6 +717,19 @@ extern "C" void probe_glScissor(GLint x, GLint y, GLsizei width,
 
 extern "C" long android_gl_draw_calls(void) { return g_draws.load(); }
 extern "C" long android_gl_textures_uploaded(void) { return g_textures.load(); }
+extern "C" long android_gl_rgba_uploaded(void) { return g_rgba_uploaded.load(); }
+extern "C" long android_gl_subimages_uploaded(void)
+{
+    return g_subimages_uploaded.load();
+}
+extern "C" long android_gl_atc_decoded(void) { return g_atc_decoded.load(); }
+extern "C" long android_gl_pvrtc_native(void) { return g_pvrtc_native.load(); }
+extern "C" long android_gl_pvrtc_decoded(void) { return g_pvrtc_decoded.load(); }
+extern "C" long android_gl_compressed_passthrough(void)
+{
+    return g_compressed_passthrough.load();
+}
+extern "C" long android_gl_decode_failed(void) { return g_decode_failed.load(); }
 
 extern "C" int android_gl_shaders_compiled(void) { return g_shaders_ok.load(); }
 extern "C" int android_gl_shaders_failed(void)   { return g_shaders_failed.load(); }
@@ -482,8 +747,11 @@ DynLibFunction symtable_glprobe[] = {
     THUNK_SPECIFIC("glDrawArrays",    probe_glDrawArrays),
     THUNK_SPECIFIC("glDrawElements",  probe_glDrawElements),
     THUNK_SPECIFIC("glTexImage2D",    probe_glTexImage2D),
+    THUNK_SPECIFIC("glTexSubImage2D", probe_glTexSubImage2D),
     THUNK_SPECIFIC("glCompressedTexImage2D",
                    probe_glCompressedTexImage2D),
+    THUNK_SPECIFIC("glCompressedTexSubImage2D",
+                   probe_glCompressedTexSubImage2D),
     THUNK_SPECIFIC("glViewport",      probe_glViewport),
     THUNK_SPECIFIC("glScissor",       probe_glScissor),
     { NULL, 0 },

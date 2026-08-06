@@ -12,6 +12,7 @@
 using GetError = GLenum (*)(void);
 
 static std::atomic<int> g_reports(0);
+static std::atomic<long> g_errors(0);
 static GetError g_get_error = nullptr;
 static constexpr int kReportLimit = 128;
 
@@ -33,12 +34,18 @@ static GetError raw_get_error(void)
 
 static void report(const char *position, const char *name, GLenum error)
 {
+    g_errors.fetch_add(1);
     int line = g_reports.fetch_add(1);
     if (line < kReportLimit)
         trace("GLDIAG: %s %s: 0x%04x", position,
               name ? name : "(unknown)", error);
     else if (line == kReportLimit)
         trace("GLDIAG: report limit reached; suppressing further errors");
+}
+
+long gl_diag_error_count(void)
+{
+    return g_errors.load();
 }
 
 void gl_diag_before(const char *name)

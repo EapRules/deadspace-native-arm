@@ -9,14 +9,14 @@
  * Where fixed function actually comes from, which is not where it looks like
  *
  * The obvious provider is libGLESv1_CM.so.1, and it is present on both the
- * build image and the console, so an early note in HALLAZGOS.md concluded the
+ * build image and the console, so an early triage note concluded the
  * harness could run this game. That was wrong, and wrong in the way that costs
  * the most: the file is glvnd's vendor-neutral *dispatch stub*. There is no
  * implementation behind it unless some vendor library registers one, and
  * Debian's Mesa is built without GLES1. The symptom is not a missing symbol -
  * it is eglCreateContext returning EGL_BAD_ALLOC for a client version of 1
  * while version 2 succeeds, which reads like an EGL configuration problem and
- * sent an agent loop chasing EGL attributes for two full iterations.
+ * cost two full debugging iterations chasing EGL attributes.
  *
  * Measured in the build image, all three under qemu-arm + llvmpipe:
  *

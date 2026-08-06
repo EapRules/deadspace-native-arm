@@ -53,11 +53,64 @@
  * exactly as it would on a real armeabi-v7a device.
  */
 #include <stdint.h>
+#include <stdlib.h>
 #include <time.h>
 #include <sys/time.h>
 
 #include "so_util.h"
 #include "thunk_gen.h"
+#include "trace.h"
+
+/* Test-only wall-clock acceleration.  NativeOnDrawFrame still runs every
+ * frame; only elapsed time observed by the game is scaled so unskippable EA
+ * splashes and cinematics do not make the compatibility matrix take an hour.
+ * Production never sets the variable and receives the host clock verbatim. */
+static double test_time_scale(void)
+{
+    static double scale = [] {
+        const char *value = getenv("DEADSPACE_TEST_TIME_SCALE");
+        if (!value || !*value)
+            return 1.0;
+        char *end = NULL;
+        double parsed = strtod(value, &end);
+        if (end == value || parsed < 1.0 || parsed > 16.0)
+            parsed = 1.0;
+        if (parsed != 1.0)
+            trace("test clock scale=%.2fx", parsed);
+        return parsed;
+    }();
+    return scale;
+}
+
+static int64_t test_extra_nanoseconds(void)
+{
+    double scale = test_time_scale();
+    if (scale == 1.0)
+        return 0;
+    static struct timespec origin = [] {
+        struct timespec value = {};
+        clock_gettime(CLOCK_MONOTONIC, &value);
+        return value;
+    }();
+    struct timespec now = {};
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    int64_t elapsed = (int64_t)(now.tv_sec - origin.tv_sec) * 1000000000LL
+                    + (int64_t)now.tv_nsec - origin.tv_nsec;
+    return (int64_t)((double)elapsed * (scale - 1.0));
+}
+
+static void add_nanoseconds(struct timespec *value, int64_t extra)
+{
+    if (!value || extra == 0)
+        return;
+    int64_t nanoseconds = (int64_t)value->tv_nsec + extra;
+    value->tv_sec += nanoseconds / 1000000000LL;
+    value->tv_nsec = nanoseconds % 1000000000LL;
+    if (value->tv_nsec < 0) {
+        value->tv_nsec += 1000000000LL;
+        value->tv_sec--;
+    }
+}
 
 extern "C" {
 
@@ -84,6 +137,7 @@ int bionic_clock_gettime(int clk_id, struct bionic_timespec *ts)
     struct timespec host;
     int rc = clock_gettime(clk_id, &host);
     if (rc == 0 && ts) {
+        add_nanoseconds(&host, test_extra_nanoseconds());
         ts->tv_sec  = (int32_t)host.tv_sec;
         ts->tv_nsec = (int32_t)host.tv_nsec;
     }
@@ -101,6 +155,10 @@ int bionic_gettimeofday(struct bionic_timeval *tv, struct timezone *tz)
     struct timeval host;
     int rc = gettimeofday(tv ? &host : NULL, tz);
     if (rc == 0 && tv) {
+        int64_t adjusted = (int64_t)host.tv_usec * 1000
+                         + test_extra_nanoseconds();
+        host.tv_sec += adjusted / 1000000000LL;
+        host.tv_usec = (adjusted % 1000000000LL) / 1000;
         tv->tv_sec  = (int32_t)host.tv_sec;
         tv->tv_usec = (int32_t)host.tv_usec;
     }
@@ -115,6 +173,14 @@ int bionic_nanosleep(const struct bionic_timespec *req, struct bionic_timespec *
 
     host_req.tv_sec  = req->tv_sec;
     host_req.tv_nsec = req->tv_nsec;
+    double scale = test_time_scale();
+    if (scale > 1.0) {
+        int64_t total = (int64_t)host_req.tv_sec * 1000000000LL
+                      + host_req.tv_nsec;
+        total = (int64_t)((double)total / scale);
+        host_req.tv_sec = total / 1000000000LL;
+        host_req.tv_nsec = total % 1000000000LL;
+    }
 
     int rc = nanosleep(&host_req, &host_rem);
     if (rem) {
@@ -126,7 +192,8 @@ int bionic_nanosleep(const struct bionic_timespec *req, struct bionic_timespec *
 
 bionic_time_t bionic_time(bionic_time_t *out)
 {
-    bionic_time_t now = (bionic_time_t)time(NULL);
+    bionic_time_t now = (bionic_time_t)(time(NULL)
+        + test_extra_nanoseconds() / 1000000000LL);
     if (out)
         *out = now;
     return now;

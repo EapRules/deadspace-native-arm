@@ -11,3 +11,4 @@
 bool gl_diag_enabled(void);
 void gl_diag_before(const char *name);
 void gl_diag_after(const char *name);
+long gl_diag_error_count(void);

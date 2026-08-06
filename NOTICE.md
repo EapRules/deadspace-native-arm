@@ -50,8 +50,11 @@ The supported binary is EA/IronMonkey's Xperia Play release; you supply your
 own copy. The port loads it at runtime and circumvents no protection.
 
 The 4:3 screenshot under `ports/deadspace/` was captured from the user's own
-copy through this loader. The 4:3 cover is an original promotional composition
-created for this port from commissioned artwork and a gameplay
-scene. Both are included only to identify the game in the PortMaster menu and
-are not required for the port to run. If a rights holder would rather they
-were not distributed, open an issue and they come out.
+copy through this loader. The cover is a fan-made composition put together for
+this port; it is not an EA product and was never issued by one. It carries
+marks owned by others - Electronic Arts and Visceral Games among them - used
+here only to identify the game the port loads. Both images exist solely so the
+title is recognisable in the PortMaster menu and in the frontend's game list,
+and neither is required for the port to run: delete them and it still works.
+If a rights holder would rather they were not distributed, open an issue and
+they come out.

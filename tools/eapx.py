@@ -25,7 +25,7 @@ import time
 import uuid
 import zipfile
 
-VERSION = "0.4.1"
+VERSION = "0.4.2"
 FORMAT_VERSION = 1
 CHUNK_SIZE = 1 << 20
 DEFAULT_SAFETY_BYTES = 128 << 20
@@ -534,6 +534,7 @@ class Progress:
         self.started = time.time()
         self.tty = self._open_tty(tty)
         self.tty_started = False
+        self.tty_geometry = None
 
     def _open_tty(self, override):
         """The console TTY is the whole UI.
@@ -568,11 +569,20 @@ class Progress:
             columns, rows = geometry.columns, geometry.lines
         except (AttributeError, OSError, ValueError):
             columns, rows = 80, 24
-        columns = max(20, columns)
-        rows = max(12, rows)
+        # Framebuffer consoles sometimes report cells that are partly hidden by
+        # display overscan. Keep all visible content inside a small safe area and
+        # never write in the terminal's final row. This also avoids triggering
+        # auto-wrap by filling a physical row to its last column.
+        columns = max(1, columns)
+        rows = max(1, rows)
+        side_margin = 2 if columns >= 24 else (1 if columns >= 8 else 0)
+        top_margin = 1 if rows >= 10 else 0
+        bottom_margin = 1 if rows >= 5 else 0
+        safe_width = max(1, columns - side_margin * 2)
+        safe_height = max(1, rows - top_margin - bottom_margin)
 
         encoding = getattr(self.tty, "encoding", None) or "utf-8"
-        branded = columns >= max(len(line) for line in EAPRULES_SIGNATURE)
+        branded = safe_width >= max(len(line) for line in EAPRULES_SIGNATURE)
         if branded:
             try:
                 "".join(EAPX_LOGO + EAPRULES_SIGNATURE).encode(encoding)
@@ -584,7 +594,7 @@ class Progress:
         subtitle = "%s %s v%s" % (
             EAPX_SUBTITLE, "·" if branded else "-", VERSION
         )
-        width = min(34, max(8, columns - 12))
+        width = min(34, max(1, safe_width - 8))
         filled = max(0, min(width, overall * width // 1000))
         full, empty = ("█", "░") if branded else ("#", "-")
         bar = full * filled + empty * (width - filled)
@@ -600,45 +610,89 @@ class Progress:
         heading = {1: "IMPORTING", 2: "SETUP FAILED", 3: "READY"}.get(
             state, "IMPORTING"
         )
+        bar_line = "[%s] %3d%%" % (bar, overall // 10)
 
-        def centred(value):
+        def fitted(value):
             value = str(value).strip()
-            if len(value) > columns:
-                value = value[:max(1, columns - 3)] + (
-                    "…" if branded else "..."
-                )
-            return value.center(columns)
+            if len(value) > safe_width:
+                suffix = "…" if branded else "..."
+                if safe_width <= len(suffix):
+                    return value[:safe_width]
+                value = value[:safe_width - len(suffix)] + suffix
+            return value
 
-        if rows >= 20:
+        if safe_height >= 18:
             body_values = (
                 [""] + list(logo) + ["", subtitle, "", heading, self.title, "",
-                 "[%s] %3d%%" % (bar, overall // 10), "", message]
+                 bar_line, "", message]
             )
         else:
             body_values = (
                 list(logo) + [subtitle, heading, self.title,
-                              "[%s] %3d%%" % (bar, overall // 10), message]
+                              bar_line, message]
             )
         if detail:
             body_values.append(detail)
         if eta:
             body_values.append(eta)
-        body = [centred(line) for line in body_values]
+        body = [fitted(line) for line in body_values]
 
         separator_glyph = "─" if branded else "-"
-        separator_width = min(columns, max(len(line) for line in signature))
-        footer = [centred(separator_glyph * separator_width)]
-        footer.extend(centred(line) for line in signature)
-        body = body[:max(0, rows - len(footer))]
-        blank = " " * columns
-        padding = [blank] * max(0, rows - len(body) - len(footer))
-        frame = "\n".join(body + padding + footer)
-        prefix = "\033[H" if self.tty_started else "\033[?25l\033[H\033[2J"
+        separator_width = min(safe_width, max(len(line) for line in signature))
+        footer = [fitted(separator_glyph * separator_width)]
+        footer.extend(fitted(line) for line in signature)
+
+        # Preserve the identity and progress bar on short terminals, dropping
+        # secondary status text before allowing the block to reach an edge.
+        if len(body) + len(footer) > safe_height:
+            compact = list(logo) + [subtitle, heading, self.title, bar_line, message]
+            if detail:
+                compact.append(detail)
+            if eta:
+                compact.append(eta)
+            body = [fitted(line) for line in compact]
+
+        def drop_last(value):
+            for index in range(len(body) - 1, -1, -1):
+                if body[index] == fitted(value):
+                    body.pop(index)
+                    return
+
+        for optional in (eta, detail, message):
+            if optional and len(body) + len(footer) > safe_height:
+                drop_last(optional)
+        if len(body) + len(footer) > safe_height and len(footer) > 1:
+            footer.pop(0)
+        if len(body) + len(footer) > safe_height and len(footer) > 1:
+            footer = [fitted("BY EAPRULES")]
+        if len(body) + len(footer) > safe_height and len(logo) > 1:
+            body = [fitted("EAPX")] + body[len(logo):]
+        for optional in (subtitle, self.title, heading, "EAPX", bar_line):
+            if len(body) + len(footer) > safe_height:
+                drop_last(optional)
+
+        block = body + footer
+        first_row = top_margin + (safe_height - len(block)) // 2 + 1
+        visible_rows = range(top_margin + 1, rows - bottom_margin + 1)
+        rendered = []
+        for row in visible_rows:
+            rendered.append("\033[%d;1H\033[2K" % row)
+        for offset, value in enumerate(block):
+            if not value:
+                continue
+            column = side_margin + (safe_width - len(value)) // 2 + 1
+            rendered.append("\033[%d;%dH%s" % (first_row + offset, column, value))
+        frame = "".join(rendered)
+        geometry_changed = self.tty_geometry != (columns, rows)
+        prefix = "\033[?25l\033[H\033[2J" if (
+            not self.tty_started or geometry_changed
+        ) else "\033[?25l"
         suffix = "\033[?25h" if state in (2, 3) else ""
         try:
             self.tty.write(prefix + frame + suffix)
             self.tty.flush()
             self.tty_started = True
+            self.tty_geometry = (columns, rows)
         except (OSError, UnicodeError):
             self.tty = None
 

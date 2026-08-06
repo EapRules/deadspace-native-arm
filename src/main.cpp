@@ -91,6 +91,11 @@ static const char *kNativeLibDir = "lib/armeabi";
 static const int kWidth  = 640;
 static const int kHeight = 480;
 
+/* Defined in symtab_glprobe.cpp: maps the engine's fixed logical panel onto the
+ * device's real drawable (letterbox/stretch), identity on a matching panel. */
+extern "C" void viewport_scale_init(int phys_w, int phys_h,
+                                    int log_w, int log_h);
+
 /*
  * Walk the module's dynamic symbol table and name every import that nothing
  * answers.
@@ -332,6 +337,10 @@ int main(int argc, char **argv)
         SDL_GL_GetDrawableSize(window, &drawable_w, &drawable_h);
         trace("window geometry: logical=%dx%d drawable=%dx%d",
               window_w, window_h, drawable_w, drawable_h);
+
+        /* Remap the engine's fixed 640x480 onto this panel (identity on a
+         * 640x480 device, letterbox/stretch on a larger one). */
+        viewport_scale_init(drawable_w, drawable_h, kWidth, kHeight);
 
         const GLubyte *(*get_string)(GLenum) =
             (const GLubyte *(*)(GLenum))SDL_GL_GetProcAddress("glGetString");
