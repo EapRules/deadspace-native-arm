@@ -17,6 +17,8 @@
 #ifndef DEADSPACE_GL_PROBE_H
 #define DEADSPACE_GL_PROBE_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -28,6 +30,40 @@ extern "C" {
  * a verdict apart from a malfunction and only ever reject on a verdict.
  */
 #define GL_PROBE_EXIT_UNUSABLE 3
+
+/*
+ * The probes report line by line through this, so the same code serves the
+ * subcommands (printing to stdout, for the launcher to capture into log.txt)
+ * and the loader's own failure path (routing them through trace()).
+ */
+typedef void (*gl_probe_report_fn)(void *ctx, const char *line);
+
+/* The sink the subcommands use. */
+void gl_probe_report_stdout(void *ctx, const char *line);
+
+/*
+ * Tier 1 - can it be loaded at all. Returns 0 or GL_PROBE_EXIT_UNUSABLE and
+ * writes the dlerror() text into `error`.
+ */
+int gl_probe_load(const char *path, const char *const *symbols, int symbol_count,
+                  char *error, size_t error_size);
+
+/*
+ * Tier 2 - does EGL come up. dlopen is not where the muOS device dies: the
+ * blob loads and SDL still answers "Can't load EGL/GL library on window
+ * creation", so the failure is inside bring-up. This walks the same path SDL
+ * does - eglGetDisplay, eglInitialize, the vendor strings - and reports each
+ * step's outcome and eglGetError() by name, so the log says which step failed
+ * rather than that something did.
+ */
+int gl_probe_init(const char *path, gl_probe_report_fn emit, void *ctx);
+
+/*
+ * Tier 3 - what does it need that this system does not have. dlerror() names
+ * only the first missing dependency; this reads DT_NEEDED out of the ELF and
+ * dlopens every entry, so one run yields the complete list.
+ */
+int gl_probe_deps(const char *path, gl_probe_report_fn emit, void *ctx);
 
 /*
  * argv[0] is the library path, argv[1..] are symbols that must resolve.

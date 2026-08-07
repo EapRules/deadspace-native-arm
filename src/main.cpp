@@ -61,6 +61,7 @@
 #include "gl_probe.h"
 #include "input_bridge.h"
 #include "patch.h"
+#include "port_version.h"
 #include "trace.h"
 #include "viewport_scale.h"
 
@@ -190,6 +191,81 @@ extern "C" int so_after_relocate(so_module *mod)
     return 1;
 }
 
+/*
+ * Everything worth knowing about a failed SDL_CreateWindow, in one place.
+ *
+ * "Can't load EGL/GL library on window creation" is the only thing SDL says,
+ * and it says it for two unrelated causes: the EGL library could not be
+ * dlopen()ed at all, or it loaded and its initialisation failed. A field log
+ * carrying just that sentence cannot be acted on - the muOS report that
+ * prompted this had the launcher's provider search succeed and SDL fail, with
+ * nothing in between to say why.
+ *
+ * So the failure path prints the state SDL decided from: which video driver is
+ * live, which ones were compiled in, the four environment variables that steer
+ * the GL search as the process actually sees them, then it takes the EGL
+ * library SDL would have used and walks its bring-up step by step and audits
+ * its dependencies. A successful boot prints none of this.
+ */
+static void trace_probe_line(void *ctx, const char *line)
+{
+    (void)ctx;
+    trace("  %s", line);
+}
+
+static void log_window_failure_forensics(const char *stage)
+{
+    trace("window failure forensics (%s)", stage);
+    trace("  SDL_GetError: %s", SDL_GetError());
+
+    const char *current = SDL_GetCurrentVideoDriver();
+    trace("  current video driver: %s", current ? current : "(none initialised)");
+
+    char drivers[256];
+    size_t used = 0;
+    int count = SDL_GetNumVideoDrivers();
+    for (int i = 0; i < count && used + 1 < sizeof(drivers); i++) {
+        const char *name = SDL_GetVideoDriver(i);
+        int written = snprintf(drivers + used, sizeof(drivers) - used, "%s%s",
+                               used ? " " : "", name ? name : "?");
+        if (written < 0)
+            break;
+        used += (size_t)written;
+    }
+    trace("  compiled-in video drivers (%d): %s", count, used ? drivers : "(none)");
+
+    /*
+     * As the process sees them, not as the launcher set them: an unset variable
+     * here and a set one there is the difference between "SDL never looked at
+     * our shim" and "it looked and the shim is wrong".
+     */
+    static const char *const kGlEnv[] = {
+        "SDL_VIDEO_EGL_DRIVER", "SDL_VIDEO_GL_DRIVER",
+        "SDL_VIDEODRIVER", "LD_LIBRARY_PATH",
+    };
+    for (size_t i = 0; i < sizeof(kGlEnv) / sizeof(kGlEnv[0]); i++) {
+        const char *value = getenv(kGlEnv[i]);
+        trace("  %s=%s", kGlEnv[i], value ? value : "(unset)");
+    }
+
+    /*
+     * SDL's own default when SDL_VIDEO_EGL_DRIVER is unset. Walking it here,
+     * in the process that just failed and with the linker state SDL used, is
+     * what separates a dlopen-level failure from an EGL-init-level one - and
+     * the dependency audit turns "something is missing" into the list.
+     *
+     * This runs after SDL has already given up, so a driver that faults inside
+     * eglInitialize takes down a process that was not going to render anyway,
+     * and the log is unbuffered up to that point.
+     */
+    const char *egl = getenv("SDL_VIDEO_EGL_DRIVER");
+    if (!egl || !*egl)
+        egl = "libEGL.so.1";
+
+    gl_probe_init(egl, trace_probe_line, NULL);
+    gl_probe_deps(egl, trace_probe_line, NULL);
+}
+
 int main(int argc, char **argv)
 {
     /*
@@ -209,6 +285,24 @@ int main(int argc, char **argv)
      */
     if (argc >= 2 && strcmp(argv[1], "--gl-probe") == 0)
         return gl_probe_main(argc - 2, argv + 2);
+    if (argc >= 3 && strcmp(argv[1], "--gl-probe-init") == 0)
+        return gl_probe_init(argv[2], gl_probe_report_stdout, NULL);
+    if (argc >= 3 && strcmp(argv[1], "--gl-probe-deps") == 0)
+        return gl_probe_deps(argv[2], gl_probe_report_stdout, NULL);
+
+    /*
+     * The launcher asks the binary for the version rather than carrying its own
+     * copy, so the two can never disagree. Plain stdout, not trace(): the caller
+     * is a shell substitution, and it runs before LOADER_TRACE means anything.
+     */
+    if (argc >= 2 && strcmp(argv[1], "--version") == 0) {
+        printf("%s\n", DEADSPACE_PORT_VERSION);
+        return 0;
+    }
+
+    /* First line of every run: a log that does not name its build cannot be
+     * told apart from a log produced by the release before it. */
+    trace("Dead Space port v%s", DEADSPACE_PORT_VERSION);
 
     if (argc < 2) {
         fprintf(stderr,
@@ -303,6 +397,7 @@ int main(int argc, char **argv)
                                   kWidth, kHeight, SDL_WINDOW_OPENGL);
         if (!window) {
             trace("SDL_CreateWindow failed: %s", SDL_GetError());
+            log_window_failure_forensics("GLES 1.1");
         } else {
             gl = SDL_GL_CreateContext(window);
             if (!gl) {
@@ -321,9 +416,10 @@ int main(int argc, char **argv)
                 window = SDL_CreateWindow("Dead Space",
                                           SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                           kWidth, kHeight, SDL_WINDOW_OPENGL);
-                if (!window)
+                if (!window) {
                     trace("SDL_CreateWindow (compat) failed: %s", SDL_GetError());
-                else if (!(gl = SDL_GL_CreateContext(window)))
+                    log_window_failure_forensics("desktop compatibility");
+                } else if (!(gl = SDL_GL_CreateContext(window)))
                     trace("no fixed-function context at all: %s", SDL_GetError());
             }
         }

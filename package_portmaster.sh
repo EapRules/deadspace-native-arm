@@ -126,5 +126,8 @@ packed_sha="$(unzip -p "$OUT" deadspace/deadspace | shasum -a 256 | cut -d' ' -f
 }
 
 echo "$OUT"
+# Single source: src/port_version.h. The binary answers --version with the same
+# string, but it is armhf and the packaging host is not, so read the header.
+echo "port version: $(sed -n 's/^#define DEADSPACE_PORT_VERSION "\(.*\)"$/\1/p' src/port_version.h)"
 echo "binary sha256: $built_sha"
 du -h "$OUT"

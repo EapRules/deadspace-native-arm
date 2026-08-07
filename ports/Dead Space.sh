@@ -43,6 +43,60 @@ cd "$GAMEDIR" || exit 1
 : > "$GAMEDIR/log.txt"
 exec > "$GAMEDIR/log.txt" 2>&1
 
+# Which build produced this log. A user reporting a problem is running whatever
+# is on their SD card, not necessarily the release they just downloaded, and the
+# first field report on the GL preflight was indistinguishable from a report on
+# the release before it. The string lives in the binary (src/port_version.h) and
+# is asked for here, so a launcher and a loader can never claim different
+# versions. The chmod is needed this early because the GL preflight below also
+# runs the binary.
+$ESUDO chmod +x "$GAMEDIR/deadspace" 2>/dev/null
+PORT_VERSION=$("$GAMEDIR/deadspace" --version 2>/dev/null) || PORT_VERSION=""
+echo "Dead Space port v${PORT_VERSION:-unknown} launcher starting"
+
+# The machine, in every log, whether or not anything goes wrong.
+#
+# Each line below was asked for by hand in a bug report at least once. Asking
+# costs days of round trips with a user who is on a different continent and a
+# different firmware, and the answers do not change between runs - so they are
+# collected unconditionally. The whole block is a dozen lines and prefixed
+# "sys:" so it greps out of the log cleanly.
+#
+# GL_DIRS is defined here rather than beside the provider search below because
+# the survey lists them; the search is what explains them.
+GL_DIRS="/usr/lib/arm-linux-gnueabihf /usr/lib/arm-linux-gnueabihf/mali \
+/lib/arm-linux-gnueabihf /usr/lib32/mali /usr/lib32"
+if [ "$DEVICE_ARCH" = "armhf" ]; then
+  GL_DIRS="$GL_DIRS /usr/lib /lib"
+fi
+
+echo "sys: uname: $(uname -rm 2>/dev/null)"
+_sys_os=$(sed -n 's/^PRETTY_NAME="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' /etc/os-release 2>/dev/null | head -n 1)
+[ -n "$_sys_os" ] || _sys_os=$(cat /etc/*-release 2>/dev/null | head -n 1)
+echo "sys: os: ${_sys_os:-unknown}"
+echo "sys: cfw: ${CFW_NAME:-unknown} device: ${DEVICE_NAME:-unknown} arch: ${DEVICE_ARCH:-unknown}"
+# What GL the firmware actually ships, seen rather than asked about. Filtered to
+# the sonames that decide whether this port can run: an unfiltered listing of a
+# multiarch library directory is hundreds of names and would bury the block it
+# belongs to, and libGLU/libGLX/libGL say nothing about a GLES 1.1 game.
+for _sys_gldir in $GL_DIRS; do
+  [ -d "$_sys_gldir" ] || continue
+  _sys_gl=$(ls "$_sys_gldir" 2>/dev/null \
+      | grep -E '^lib(EGL|GLESv1_CM|GLESv2|mali|Mali|GLdispatch|gbm\.|drm\.)' \
+      | tr '\n' ' ')
+  echo "sys: gl $_sys_gldir: ${_sys_gl:-(no GL libraries)}"
+done
+# Permissions included on purpose: a render node the user cannot open fails the
+# same way a missing driver does.
+_sys_dri=$(ls -la /dev/dri 2>/dev/null | sed 1d \
+    | awk 'NF>=9 {print $NF" ("$1" "$3":"$4")"}' | tr '\n' ' ')
+echo "sys: dri: ${_sys_dri:-none}"
+_sys_mem=$(free -m 2>/dev/null | sed -n '2p' | tr -s ' ')
+[ -n "$_sys_mem" ] || _sys_mem=$(grep -E '^Mem(Total|Available)' /proc/meminfo 2>/dev/null | tr -s ' \n' ' ')
+echo "sys: mem: ${_sys_mem:-unknown}"
+_sys_sdl=$(ls "$GAMEDIR"/libs.armhf/libSDL2*.so* 2>/dev/null | xargs -n1 basename 2>/dev/null | tr '\n' ' ')
+echo "sys: sdl bundled: ${_sys_sdl:-none}"
+
 # PortMaster's portable metadata points at deadspace/cover.png, which is the
 # canonical source shipped in the release. ArkOS/dArkOS additionally keeps a
 # normalized EmulationStation copy beside the other port artwork. A direct
@@ -271,15 +325,11 @@ fi
 #      without a 32-bit provider SDL either falls back to something that never
 #      reaches the framebuffer, or fails to create a window at all.
 #
-# Directories are architecture-scoped, so a 64-bit library can never be picked:
-# the multiarch triplet dir and lib32 are 32-bit by definition, and the bare
-# /usr/lib and /lib are only consulted on a pure-armhf rootfs.
-GL_DIRS="/usr/lib/arm-linux-gnueabihf /usr/lib/arm-linux-gnueabihf/mali \
-/lib/arm-linux-gnueabihf /usr/lib32/mali /usr/lib32"
-if [ "$DEVICE_ARCH" = "armhf" ]; then
-  GL_DIRS="$GL_DIRS /usr/lib /lib"
-fi
-
+# The directories searched are GL_DIRS, set with the system survey at the top of
+# this script. They are architecture-scoped, so a 64-bit library can never be
+# picked: the multiarch triplet dir and lib32 are 32-bit by definition, and the
+# bare /usr/lib and /lib are only consulted on a pure-armhf rootfs.
+#
 # A candidate that exists is not a driver that works. On a 64-bit userland the
 # 32-bit directories can hold an orphaned blob whose own dependencies were
 # never installed: /usr/lib32/libmali.so.0 was picked on a muOS device, SDL
@@ -297,7 +347,11 @@ fi
 #
 # A probe that cannot run at all is not a verdict: the candidate is accepted
 # unchecked, which is the behaviour before this check existed.
-$ESUDO chmod +x "$GAMEDIR/deadspace"
+#
+# Acceptance is logged as well as rejection. Silence on the happy path made the
+# preflight invisible: a log showing "using Mali blob X" followed by SDL failing
+# could equally mean the preflight passed and SDL failed anyway, or that the
+# user was running a release with no preflight in it at all.
 GL_PROBE_REASON=""
 GL_REJECTED=""
 GL_FIRST_REASON=""
@@ -310,6 +364,7 @@ gl_provider_loadable() {
   _out=$("$GAMEDIR/deadspace" --gl-probe "$1" eglGetDisplay 2>&1)
   _rc=$?
   if [ "$_rc" = 0 ]; then
+    echo "GL: preflight ok - $1 loads and resolves eglGetDisplay"
     return 0
   fi
   if [ "$_rc" = 3 ]; then
@@ -319,6 +374,11 @@ gl_provider_loadable() {
     # candidate the search would have committed to before this check existed.
     [ -n "$GL_FIRST_REASON" ] || GL_FIRST_REASON="$GL_PROBE_REASON"
     echo "GL: rejecting $1 - $GL_PROBE_REASON"
+    # dlerror() names one missing dependency and stops, so fixing a firmware by
+    # that alone is one library per bug report. The audit reads DT_NEEDED out of
+    # the candidate and tries each entry, which turns the whole gap into a list
+    # this log already contains.
+    "$GAMEDIR/deadspace" --gl-probe-deps "$1" 2>&1 | sed 's/^/GL:   /'
     return 1
   fi
   echo "GL: preflight could not run (exit $_rc: $_out); accepting $1 unchecked"
@@ -353,6 +413,7 @@ fi
 GL_SHIM="/tmp/deadspace-gl"
 rm -rf "$GL_SHIM"
 GL_READY=""
+GL_PROVIDER=""
 if [ -n "$MALI_BLOB" ]; then
   if mkdir -p "$GL_SHIM" \
      && ln -sf "$MALI_BLOB" "$GL_SHIM/libEGL.so.1" \
@@ -360,6 +421,7 @@ if [ -n "$MALI_BLOB" ]; then
      && ln -sf "$MALI_BLOB" "$GL_SHIM/libGLESv2.so.2" \
      && ln -sf "$MALI_BLOB" "$GL_SHIM/libmali.so.1"; then
     GL_READY="y"
+    GL_PROVIDER="$MALI_BLOB"
     echo "GL: using Mali blob $MALI_BLOB"
   else
     echo "GL: failed to create /tmp shim, using system libraries"
@@ -382,6 +444,7 @@ else
   done
   if [ -n "$GL_EGL" ]; then
     GL_READY="y"
+    GL_PROVIDER="$GL_EGL"
     echo "GL: no Mali blob; using the device's 32-bit EGL/GLES set ($GL_EGL)"
   fi
 fi
@@ -420,10 +483,17 @@ else
 
 $GL_FAIL_WHAT
 
-  The screen will stay black or the
-  game will exit. See log.txt.
+  Not starting the game. See log.txt.
 
 EOF
+  # And stop here. Starting the loader without a GL provider only replaced this
+  # message with a black screen carrying the port's cursor, which reads as a
+  # hang and buried the explanation the user had just been shown - an ArkOS
+  # user reported exactly that. show_screen already blocked long enough to read
+  # it; return to the frontend instead.
+  echo "Not launching the game: there is no GL provider to render with"
+  pm_finish
+  exit 1
 fi
 
 mkdir -p "$GAMEDIR/var"
@@ -440,6 +510,19 @@ $TASKSET "$GAMEDIR/deadspace" "$GAMEDIR"
 GAME_RC=$?
 
 $ESUDO kill -9 "$(pidof gptokeyb)" 2>/dev/null
+
+# The case the muOS report is: the preflight accepted a provider and SDL still
+# could not open a window. That means the failure is past dlopen, somewhere in
+# EGL bring-up, and the loader's own forensics already walked SDL's default EGL
+# library from inside the failed process. Walk the provider the launcher chose
+# too - on a Mali blob those are different files, and which of the two comes up
+# is the answer. Done after the run so a healthy boot pays nothing.
+if [ -n "$GL_PROVIDER" ] && grep -q "SDL_CreateWindow failed" "$GAMEDIR/log.txt"; then
+  echo "GL: SDL could not open a window on an accepted provider; auditing $GL_PROVIDER"
+  "$GAMEDIR/deadspace" --gl-probe-init "$GL_PROVIDER" 2>&1 | sed 's/^/GL:   /'
+  "$GAMEDIR/deadspace" --gl-probe-deps "$GL_PROVIDER" 2>&1 | sed 's/^/GL:   /'
+fi
+
 rm -rf /tmp/deadspace-gl
 unset LD_LIBRARY_PATH SDL_GAMECONTROLLERCONFIG
 
