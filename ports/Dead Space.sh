@@ -51,7 +51,12 @@ exec > "$GAMEDIR/log.txt" 2>&1
 # versions. The chmod is needed this early because the GL preflight below also
 # runs the binary.
 $ESUDO chmod +x "$GAMEDIR/deadspace" 2>/dev/null
-PORT_VERSION=$("$GAMEDIR/deadspace" --version 2>/dev/null) || PORT_VERSION=""
+# The bundled libraries are not on LD_LIBRARY_PATH yet (that export happens
+# further down); without them the binary cannot link and the answer comes back
+# empty - a real device printed "vunknown" here. The path rides along just for
+# this one call.
+PORT_VERSION=$(LD_LIBRARY_PATH="$GAMEDIR/libs.armhf${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    "$GAMEDIR/deadspace" --version 2>/dev/null) || PORT_VERSION=""
 echo "Dead Space port v${PORT_VERSION:-unknown} launcher starting"
 
 # The machine, in every log, whether or not anything goes wrong.
@@ -310,20 +315,45 @@ fi
 # Which stack that is depends on the device, not on the firmware's name, so it
 # is found by capability:
 #
-#   1. A unified Mali blob - one .so exporting EGL, GLESv1_CM and GLESv2. Try
-#      the exact tested filenames first (fast, known-good), then any Mali build
-#      in the 32-bit library directories, because every distribution names it
-#      differently: versioned upstream names on Debian-style CFWs
-#      (libmali-bifrost-g31-*.so), an unversioned libmali.so.1 on Buildroot ones,
-#      libMali.so where a firmware symlinks it. The blob is then linked to every
-#      name the game asks for.
-#   2. No blob, but a real 32-bit EGL/GLES set - a Mesa/glvnd userland, which is
-#      what a Panfrost-only device ships. Each entry point is linked under its
-#      own name; only GL names are exposed, so nothing else in a system library
-#      directory can shadow the port's bundled libs.
-#   3. Neither. Say so on screen instead of leaving the user with a black panel:
-#      without a 32-bit provider SDL either falls back to something that never
-#      reaches the framebuffer, or fails to create a window at all.
+#   1. A unified Mali blob under one of the exact tested filenames - one .so
+#      exporting EGL, GLESv1_CM and GLESv2, linked to every name the game asks
+#      for. Known-good and therefore first.
+#   2. A split Mali wrapper set - a directory holding both libEGL.so and
+#      libGLESv2.so, the layout a Batocera-derived firmware installs. SDL is
+#      pointed straight at those two files (SDL_VIDEO_EGL_DRIVER /
+#      SDL_VIDEO_GL_DRIVER) rather than being left to find a blob.
+#   3. Any other Mali blob in the 32-bit library directories, because every
+#      distribution names it differently: versioned upstream names on
+#      Debian-style CFWs (libmali-bifrost-g31-*.so), an unversioned libmali.so.1
+#      on Buildroot ones, libMali.so where a firmware symlinks it.
+#   4. No Mali anything, but a real 32-bit EGL/GLES set - a Mesa/glvnd userland,
+#      which is what a Panfrost-only device ships. Each entry point is linked
+#      under its own name; only GL names are exposed, so nothing else in a
+#      system library directory can shadow the port's bundled libs.
+#   5. None of those. Say so on screen instead of leaving the user with a black
+#      panel: without a 32-bit provider SDL either falls back to something that
+#      never reaches the framebuffer, or fails to create a window at all.
+#
+# Why the wrapper set sits between the two blob tiers, and not elsewhere:
+#
+#   - It must come after tier 1 so that every device already working keeps
+#      working unchanged. A Debian-style CFW that ships the tested blob usually
+#      also ships unversioned libEGL.so/libGLESv2.so symlinks beside it; if the
+#      wrapper tier ran first it would win there and change a happy path for no
+#      reason. Tier 1 matches three literal filenames, so it is cheap to keep in
+#      front.
+#   - It must come before tier 3, and that is the whole fix. A Knulli device has
+#      /usr/lib32/libmali.so.0 next to the wrapper set: the glob tier picks the
+#      blob, the preflight can even pass on it, and SDL still dies in
+#      SDL_CreateWindow. The wrapper set is the stack that firmware actually
+#      supports, so it has to be asked for first.
+#
+# The discriminator for tier 2 is the *unversioned* pair libEGL.so +
+# libGLESv2.so, present together in one directory. A runtime Mesa/glvnd rootfs
+# ships only the versioned sonames (libEGL.so.1, libGLESv2.so.2); the
+# unversioned names are how the split Mali wrapper installs itself, and they are
+# the exact paths the Knulli user hand-edited into a working launcher. Matching
+# on them keeps tier 4 for Mesa, where it belongs.
 #
 # The directories searched are GL_DIRS, set with the system survey at the top of
 # this script. They are architecture-scoped, so a 64-bit library can never be
@@ -355,21 +385,29 @@ fi
 GL_PROBE_REASON=""
 GL_REJECTED=""
 GL_FIRST_REASON=""
+#
+# The symbol the candidate must resolve is a parameter because the tiers below
+# ask three different questions of three different kinds of library: does this
+# provide EGL (eglGetDisplay), does it provide GLES 2 (glGetString), does it
+# provide fixed function (glMatrixMode, the same probe thunks/khronos/gles1.cpp
+# uses to adopt a provider). A library rejected for one symbol may be the right
+# answer for another, so the rejection cache is keyed by both.
 gl_provider_loadable() {
-  local _out _rc
+  local _out _rc _sym
+  _sym="${2:-eglGetDisplay}"
   GL_PROBE_REASON=""
   case " $GL_REJECTED " in
-    *" $1 "*) GL_PROBE_REASON="already rejected"; return 1 ;;
+    *" $1@$_sym "*) GL_PROBE_REASON="already rejected"; return 1 ;;
   esac
-  _out=$("$GAMEDIR/deadspace" --gl-probe "$1" eglGetDisplay 2>&1)
+  _out=$("$GAMEDIR/deadspace" --gl-probe "$1" "$_sym" 2>&1)
   _rc=$?
   if [ "$_rc" = 0 ]; then
-    echo "GL: preflight ok - $1 loads and resolves eglGetDisplay"
+    echo "GL: preflight ok - $1 loads and resolves $_sym"
     return 0
   fi
   if [ "$_rc" = 3 ]; then
     GL_PROBE_REASON=$(printf '%s' "$_out" | head -n 1)
-    GL_REJECTED="$GL_REJECTED $1"
+    GL_REJECTED="$GL_REJECTED $1@$_sym"
     # The first rejection is the one the on-screen message quotes: it is the
     # candidate the search would have committed to before this check existed.
     [ -n "$GL_FIRST_REASON" ] || GL_FIRST_REASON="$GL_PROBE_REASON"
@@ -385,21 +423,63 @@ gl_provider_loadable() {
   return 0
 }
 
+# Which of the tiers above answered. It decides how the shim is built and, past
+# that, whether SDL is asked for the "mali" video backend.
+GL_TIER=""
+
 MALI_BLOB=""
 gl_try_blob() {
   [ -e "$1" ] || return 1
   gl_provider_loadable "$1" || return 1
   MALI_BLOB="$1"
+  GL_TIER="blob"
   return 0
 }
 
+# Tier 1 - the exact tested blob filenames.
 for candidate in \
   /usr/lib/arm-linux-gnueabihf/libmali-bifrost-g31-rxp0-gbm.so \
   /usr/lib/arm-linux-gnueabihf/libMali.so \
   /usr/lib/arm-linux-gnueabihf/libmali.so.1; do
   gl_try_blob "$candidate" && break
 done
-if [ -z "$MALI_BLOB" ]; then
+
+# Tier 2 - a split wrapper set. Both halves are probed for the symbol SDL will
+# actually call through them, because half a working stack renders nothing.
+#
+# The game is GLES 1.1 fixed function, and the wrapper set's own libGLESv2.so
+# does not have to carry it, so a third library is looked for beside the pair:
+# whatever in that directory answers glMatrixMode. That is the same question
+# thunks/khronos/gles1.cpp asks before adopting a provider, and it dlopens the
+# soname libmali.so.1 - hence the shim link further down. Not finding one is not
+# fatal: the loader then resolves fixed function through the driver's own
+# GetProcAddress, which is the path a unified blob would have taken anyway.
+GL_WRAP_EGL=""
+GL_WRAP_GLES=""
+GL_WRAP_ES1=""
+if [ -z "$GL_TIER" ]; then
+  for _gldir in $GL_DIRS; do
+    [ -d "$_gldir" ] || continue
+    [ -e "$_gldir/libEGL.so" ] && [ -e "$_gldir/libGLESv2.so" ] || continue
+    gl_provider_loadable "$_gldir/libEGL.so" || continue
+    gl_provider_loadable "$_gldir/libGLESv2.so" glGetString || continue
+    GL_WRAP_EGL="$_gldir/libEGL.so"
+    GL_WRAP_GLES="$_gldir/libGLESv2.so"
+    for _es1 in "$_gldir"/libGLESv1_CM.so "$_gldir"/libGLESv1_CM.so.* \
+                "$_gldir"/libmali.so "$_gldir"/libmali.so.* \
+                "$_gldir"/libMali.so*; do
+      [ -e "$_es1" ] || continue
+      gl_provider_loadable "$_es1" glMatrixMode || continue
+      GL_WRAP_ES1="$_es1"
+      break
+    done
+    GL_TIER="wrapper"
+    break
+  done
+fi
+
+# Tier 3 - any other Mali blob, wherever the distribution put it.
+if [ -z "$GL_TIER" ]; then
   for _gldir in $GL_DIRS; do
     [ -d "$_gldir" ] || continue
     for _cand in "$_gldir"/libmali-*.so "$_gldir"/libmali.so.* \
@@ -426,6 +506,39 @@ if [ -n "$MALI_BLOB" ]; then
   else
     echo "GL: failed to create /tmp shim, using system libraries"
   fi
+elif [ "$GL_TIER" = "wrapper" ]; then
+  # SDL is told the two files by path rather than being left to resolve
+  # libEGL.so.1 / libGLESv2.so.2 itself: on the firmware this tier is for, the
+  # sonames in the library path are the ones that do not work, and the shim
+  # cannot outrank a system directory SDL dlopens by absolute name.
+  #
+  # The shim is still built, under the canonical sonames, because the loader and
+  # the game dlopen those directly - SDL_VIDEO_* only reaches SDL.
+  if mkdir -p "$GL_SHIM" \
+     && ln -sf "$GL_WRAP_EGL" "$GL_SHIM/libEGL.so.1" \
+     && ln -sf "$GL_WRAP_GLES" "$GL_SHIM/libGLESv2.so.2"; then
+    export SDL_VIDEO_EGL_DRIVER="$GL_WRAP_EGL"
+    export SDL_VIDEO_GL_DRIVER="$GL_WRAP_GLES"
+    # gl4es reads this and nothing else does. Batocera-derived firmwares ship it
+    # as the 32-bit libGL, which is one of the two libraries the loader tries for
+    # fixed function, and its default target is GLES 2 - where fixed function
+    # goes through its own shader emulation. This game is GLES 1.1, so ask for
+    # the 1.1 back end. On a firmware without gl4es the variable is read by
+    # nobody, which is why it is safe to set unconditionally on this tier.
+    export LIBGL_ES=1
+    if [ -n "$GL_WRAP_ES1" ]; then
+      ln -sf "$GL_WRAP_ES1" "$GL_SHIM/libGLESv1_CM.so.1"
+      ln -sf "$GL_WRAP_ES1" "$GL_SHIM/libmali.so.1"
+      echo "GL: fixed function from $GL_WRAP_ES1"
+    else
+      echo "GL: no fixed-function library beside the wrapper set; GLES 1.1 will be resolved through the driver's GetProcAddress"
+    fi
+    GL_READY="y"
+    GL_PROVIDER="$GL_WRAP_EGL"
+    echo "GL: using the 32-bit wrapper set in ${GL_WRAP_EGL%/*} (EGL=$GL_WRAP_EGL GLES=$GL_WRAP_GLES)"
+  else
+    echo "GL: failed to create /tmp shim for the wrapper set, using system libraries"
+  fi
 else
   # No unified blob: link whatever 32-bit EGL/GLES entry points exist, each
   # under its own name. libEGL is the one SDL cannot start without.
@@ -444,6 +557,7 @@ else
   done
   if [ -n "$GL_EGL" ]; then
     GL_READY="y"
+    GL_TIER="mesa"
     GL_PROVIDER="$GL_EGL"
     echo "GL: no Mali blob; using the device's 32-bit EGL/GLES set ($GL_EGL)"
   fi
@@ -451,6 +565,35 @@ fi
 
 if [ -n "$GL_READY" ]; then
   export LD_LIBRARY_PATH="$GL_SHIM:$LD_LIBRARY_PATH"
+
+  # Which SDL video backend to ask for.
+  #
+  # A Batocera-derived firmware carries a vendor "mali" backend that talks to the
+  # blob directly; its kmsdrm/x11 defaults are where SDL_CreateWindow dies on
+  # those devices, and a Knulli user got this port, Mass Effect and Real Racing 3
+  # all running by exporting SDL_VIDEODRIVER=mali by hand. Upstream SDL has no
+  # such backend, and naming a backend SDL was not built with makes SDL_Init fail
+  # outright - so this is decided by asking SDL what it has, never by firmware
+  # name. On a CFW without it the list simply does not contain "mali" and the
+  # default is kept, which is why every device working today stays unchanged.
+  #
+  # The SDL being asked is the SDL the game will use: libSDL2 is deliberately not
+  # bundled (tools/collect_libs.sh leaves it to the device), so this binary and
+  # the game both link the system libSDL2-2.0.so.0. See src/sdl_info.h.
+  #
+  # Only on the two Mali tiers. On the Mesa/glvnd tier there is no Mali stack for
+  # a "mali" backend to drive, and a firmware that had both would be describing a
+  # device this port has never seen.
+  if [ "$GL_TIER" = "wrapper" ] || [ "$GL_TIER" = "blob" ]; then
+    SDL_INFO=$("$GAMEDIR/deadspace" --sdl-info 2>&1)
+    printf '%s\n' "$SDL_INFO" | sed 's/^/GL: /'
+    if printf '%s\n' "$SDL_INFO" | grep -q '^sdl: video driver: mali$'; then
+      export SDL_VIDEODRIVER=mali
+      echo "GL: SDL has a 'mali' video driver and the GL stack is the device's Mali one; selecting SDL_VIDEODRIVER=mali"
+    else
+      echo "GL: SDL has no 'mali' video driver; keeping SDL default (${SDL_VIDEODRIVER:-unset})"
+    fi
+  fi
 else
   rm -rf "$GL_SHIM"
   echo "GL: no 32-bit GL provider found; searched: $GL_DIRS"
@@ -525,6 +668,7 @@ fi
 
 rm -rf /tmp/deadspace-gl
 unset LD_LIBRARY_PATH SDL_GAMECONTROLLERCONFIG
+unset SDL_VIDEODRIVER SDL_VIDEO_EGL_DRIVER SDL_VIDEO_GL_DRIVER LIBGL_ES
 
 pm_finish
 exit "$GAME_RC"

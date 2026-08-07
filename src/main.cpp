@@ -62,6 +62,7 @@
 #include "input_bridge.h"
 #include "patch.h"
 #include "port_version.h"
+#include "sdl_info.h"
 #include "trace.h"
 #include "viewport_scale.h"
 
@@ -289,6 +290,14 @@ int main(int argc, char **argv)
         return gl_probe_init(argv[2], gl_probe_report_stdout, NULL);
     if (argc >= 3 && strcmp(argv[1], "--gl-probe-deps") == 0)
         return gl_probe_deps(argv[2], gl_probe_report_stdout, NULL);
+
+    /*
+     * The same idea one layer up: the launcher has to pick a video backend for
+     * SDL, and only SDL knows which ones it was built with. No SDL_Init here -
+     * see src/sdl_info.h.
+     */
+    if (argc >= 2 && strcmp(argv[1], "--sdl-info") == 0)
+        return sdl_info_main();
 
     /*
      * The launcher asks the binary for the version rather than carrying its own
