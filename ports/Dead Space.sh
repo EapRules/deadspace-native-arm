@@ -280,19 +280,71 @@ if [ "$DEVICE_ARCH" = "armhf" ]; then
   GL_DIRS="$GL_DIRS /usr/lib /lib"
 fi
 
+# A candidate that exists is not a driver that works. On a 64-bit userland the
+# 32-bit directories can hold an orphaned blob whose own dependencies were
+# never installed: /usr/lib32/libmali.so.0 was picked on a muOS device, SDL
+# answered "Can't load EGL/GL library on window creation", and the run ended
+# with 182 GLES1 imports resolved to nil. Existence was checked; loadability
+# was not.
+#
+# So every candidate is dlopen()ed before it is committed to. The probe is the
+# port's own binary (--gl-probe): it is 32-bit, it is already here, and it
+# loads the library the same way SDL will, in the same runtime linker and the
+# same LD_LIBRARY_PATH. ldd would have been simpler and would have been wrong
+# on exactly the devices this is for - it execs the host's interpreter list, so
+# on a 64-bit rootfs it reports an armhf .so as "not a dynamic executable" and
+# says nothing about its dependencies.
+#
+# A probe that cannot run at all is not a verdict: the candidate is accepted
+# unchecked, which is the behaviour before this check existed.
+$ESUDO chmod +x "$GAMEDIR/deadspace"
+GL_PROBE_REASON=""
+GL_REJECTED=""
+GL_FIRST_REASON=""
+gl_provider_loadable() {
+  local _out _rc
+  GL_PROBE_REASON=""
+  case " $GL_REJECTED " in
+    *" $1 "*) GL_PROBE_REASON="already rejected"; return 1 ;;
+  esac
+  _out=$("$GAMEDIR/deadspace" --gl-probe "$1" eglGetDisplay 2>&1)
+  _rc=$?
+  if [ "$_rc" = 0 ]; then
+    return 0
+  fi
+  if [ "$_rc" = 3 ]; then
+    GL_PROBE_REASON=$(printf '%s' "$_out" | head -n 1)
+    GL_REJECTED="$GL_REJECTED $1"
+    # The first rejection is the one the on-screen message quotes: it is the
+    # candidate the search would have committed to before this check existed.
+    [ -n "$GL_FIRST_REASON" ] || GL_FIRST_REASON="$GL_PROBE_REASON"
+    echo "GL: rejecting $1 - $GL_PROBE_REASON"
+    return 1
+  fi
+  echo "GL: preflight could not run (exit $_rc: $_out); accepting $1 unchecked"
+  return 0
+}
+
 MALI_BLOB=""
+gl_try_blob() {
+  [ -e "$1" ] || return 1
+  gl_provider_loadable "$1" || return 1
+  MALI_BLOB="$1"
+  return 0
+}
+
 for candidate in \
   /usr/lib/arm-linux-gnueabihf/libmali-bifrost-g31-rxp0-gbm.so \
   /usr/lib/arm-linux-gnueabihf/libMali.so \
   /usr/lib/arm-linux-gnueabihf/libmali.so.1; do
-  [ -e "$candidate" ] && { MALI_BLOB="$candidate"; break; }
+  gl_try_blob "$candidate" && break
 done
 if [ -z "$MALI_BLOB" ]; then
   for _gldir in $GL_DIRS; do
     [ -d "$_gldir" ] || continue
     for _cand in "$_gldir"/libmali-*.so "$_gldir"/libmali.so.* \
                  "$_gldir"/libmali.so "$_gldir"/libMali.so*; do
-      [ -e "$_cand" ] && { MALI_BLOB="$_cand"; break; }
+      gl_try_blob "$_cand" && break
     done
     [ -n "$MALI_BLOB" ] && break
   done
@@ -322,6 +374,7 @@ else
     # it and the GLES libraries are taken from that same directory - a set
     # assembled from two userlands would not be one working stack.
     [ -e "$_gldir/libEGL.so.1" ] || continue
+    gl_provider_loadable "$_gldir/libEGL.so.1" || continue
     for _soname in libEGL.so.1 libGLESv1_CM.so.1 libGLESv2.so.2; do
       [ -e "$_gldir/$_soname" ] && ln -sf "$_gldir/$_soname" "$GL_SHIM/$_soname"
     done
@@ -338,13 +391,34 @@ if [ -n "$GL_READY" ]; then
 else
   rm -rf "$GL_SHIM"
   echo "GL: no 32-bit GL provider found; searched: $GL_DIRS"
-  show_screen 12 <<EOF
-
-  Dead Space - no 32-bit GPU driver
-
-  This firmware ships no 32-bit Mali
+  # Two different firmwares end up here and the fix is not the same, so the
+  # screen has to say which one this is. "No driver at all" is a missing
+  # package; "a driver that will not load" is a 32-bit dependency the firmware
+  # never installed next to it, and that is what a 64-bit userland hits.
+  GL_FAIL_WHAT="  This firmware ships no 32-bit Mali
   blob and no 32-bit EGL/GLES set, so
-  the game cannot open a window.
+  the game cannot open a window."
+  if [ -n "$GL_REJECTED" ]; then
+    # The panel is 40 columns at its narrowest, so the screen carries the one
+    # word that identifies the problem - the library the driver wanted and did
+    # not find - and log.txt carries the whole dlerror() text.
+    case "$GL_FIRST_REASON" in
+      *"cannot open shared object file"*)
+        GL_FAIL_REASON="missing: ${GL_FIRST_REASON%%:*}" ;;
+      *)
+        GL_FAIL_REASON="$GL_FIRST_REASON" ;;
+    esac
+    GL_FAIL_WHAT="  A 32-bit GPU driver exists but
+  cannot be loaded - its own 32-bit
+  libraries are not installed:
+
+    ${GL_FAIL_REASON:0:34}"
+  fi
+  show_screen 14 <<EOF
+
+  Dead Space - unusable GPU driver
+
+$GL_FAIL_WHAT
 
   The screen will stay black or the
   game will exit. See log.txt.
@@ -353,7 +427,6 @@ EOF
 fi
 
 mkdir -p "$GAMEDIR/var"
-$ESUDO chmod +x "$GAMEDIR/deadspace"
 
 # Controls are delivered directly through the game's JNI key/pointer exports.
 # gptokeyb remains only for PortMaster's standard exit combination.

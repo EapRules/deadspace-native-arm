@@ -58,6 +58,7 @@
 #include "fb_probe.h"
 #include "fix_path.h"
 #include "gl_diag.h"
+#include "gl_probe.h"
 #include "input_bridge.h"
 #include "patch.h"
 #include "trace.h"
@@ -201,6 +202,13 @@ int main(int argc, char **argv)
      */
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
+
+    /*
+     * The launcher's GL provider preflight, before anything that expects a
+     * game directory: this mode loads one library and exits.
+     */
+    if (argc >= 2 && strcmp(argv[1], "--gl-probe") == 0)
+        return gl_probe_main(argc - 2, argv + 2);
 
     if (argc < 2) {
         fprintf(stderr,
