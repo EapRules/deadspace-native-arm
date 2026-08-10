@@ -25,22 +25,33 @@ import time
 import uuid
 import zipfile
 
-VERSION = "0.4.3"
+VERSION = "0.4.4"
 FORMAT_VERSION = 1
 CHUNK_SIZE = 1 << 20
 DEFAULT_SAFETY_BYTES = 128 << 20
 DEFAULT_HOOK_TIMEOUT = 600
 MAX_MESSAGE_BYTES = 200
 
+# One 4x5 pixel typeface for logo and signature, rendered with only the
+# half blocks the Linux console can actually draw: space, ▀, ▄ and █, all
+# present in every kernel console font because they date back to cp437.
+#
+# This is a hard constraint, not a style choice. The framebuffer console
+# draws glyphs from a small kernel font, and a rune it does not carry is
+# substituted with a fallback diamond - photographed on real hardware, an
+# earlier quadrant-block logo (▄▖▙▌▚▘) rendered as three rows of diamond
+# noise. The `branded` gate below can only test the ENCODING; no userspace
+# check sees the console font's coverage, so the art itself must stay
+# inside the set that every console font has.
 EAPX_LOGO = (
-    "▄▖▄▖▄▖▖▖",
-    "▙▖▌▌▙▌▚▘",
-    "▙▖▛▌▌ ▌▌",
+    "█▀▀▀ ▄▀▀▄ █▀▀▄ ▀▄▄▀",
+    "█▀▀  █▀▀█ █▀▀   ██",
+    "▀▀▀▀ ▀  ▀ ▀    ▀  ▀",
 )
 EAPRULES_SIGNATURE = (
-    "█▀▄ █ █   █▀▀ █▀█ █▀█ █▀▄ █ █ █   █▀▀ █▀▀",
-    "█▀▄  █    █▀▀ █▀█ █▀▀ █▀▄ █ █ █   █▀▀ ▀▀█",
-    "▀▀   ▀    ▀▀▀ ▀ ▀ ▀   ▀ ▀ ▀▀▀ ▀▀▀ ▀▀▀ ▀▀▀",
+    "█▀▀▄ █  █   █▀▀▀ ▄▀▀▄ █▀▀▄ █▀▀▄ █  █ █    █▀▀▀ ▄▀▀▀",
+    "█▀▀▄  ██    █▀▀  █▀▀█ █▀▀  █▀█  █  █ █    █▀▀   ▀▀▄",
+    "▀▀▀   ▀▀    ▀▀▀▀ ▀  ▀ ▀    ▀  ▀  ▀▀  ▀▀▀▀ ▀▀▀▀ ▀▀▀",
 )
 EAPX_SUBTITLE = "Android Port eXtractor"
 
@@ -589,8 +600,14 @@ class Progress:
             except (LookupError, UnicodeError):
                 branded = False
 
-        logo = EAPX_LOGO if branded else ("EAPX",)
-        signature = EAPRULES_SIGNATURE if branded else ("BY EAPRULES",)
+        def block(lines):
+            # Pad to one width so per-line centring cannot shear the
+            # letterforms sideways: art is a block, not independent rows.
+            width = max(len(line) for line in lines)
+            return tuple(line.ljust(width) for line in lines)
+
+        logo = block(EAPX_LOGO) if branded else ("EAPX",)
+        signature = block(EAPRULES_SIGNATURE) if branded else ("BY EAPRULES",)
         subtitle = "%s %s v%s" % (
             EAPX_SUBTITLE, "·" if branded else "-", VERSION
         )
@@ -604,7 +621,7 @@ class Progress:
             rate = self.done_bytes / elapsed if elapsed > 0.5 else 0
             if rate > 0:
                 left = int((self.total_bytes - self.done_bytes) / rate)
-                eta = "  %d:%02d left  %.1f MB/s" % (
+                eta = "%d:%02d left  %.1f MB/s" % (
                     left // 60, left % 60, rate / 1048576.0
                 )
         heading = {1: "IMPORTING", 2: "SETUP FAILED", 3: "READY"}.get(
@@ -613,9 +630,12 @@ class Progress:
         bar_line = "[%s] %3d%%" % (bar, overall // 10)
 
         def fitted(value):
-            value = str(value).strip()
+            # No strip: art rows are padded to a common width so the block
+            # centres as one piece; stripping re-centred each row alone and
+            # sheared the letterforms a column sideways.
+            value = str(value).rstrip("\n")
             if len(value) > safe_width:
-                suffix = "…" if branded else "..."
+                suffix = "..."  # U+2026 is not in console fonts; see the art note
                 if safe_width <= len(suffix):
                     return value[:safe_width]
                 value = value[:safe_width - len(suffix)] + suffix
@@ -1741,6 +1761,48 @@ def collect_rule(rule, group, abi, digests, logger):
                 )
             chosen.append(Item(rule["id"], template(rule["destination"], abi),
                                candidate, None, size, crc, sha256))
+        # A blob can also live inside a container: an Android/obb backup is
+        # handed over either as a zip or as that zip extracted to a folder,
+        # and in both the OBB sits under <package>/. Candidate collapsed
+        # 'archive' and 'loose' into one concept precisely so a rule could
+        # reach content either way, but this branch only ever looked at the
+        # candidate's own name -- which has no slash, so every pattern
+        # written against the backup layout was unmatchable by construction.
+        for candidate in group:
+            if not candidate.is_container:
+                continue
+            for name in sorted(candidate.archive.entries):
+                if not any(matches(name, p) for p in patterns):
+                    continue
+                info = candidate.archive.info(name)
+                size, crc = info.file_size, info.CRC
+                size_reason = check_size_spec(spec, size)
+                if size_reason:
+                    rejected.append("%s rejected: %s" % (name, size_reason))
+                    continue
+                sha256 = None
+                if wants_hash:
+                    sha256, crc, size = digests.member(candidate.archive, name)
+                critical_sha256 = None
+                if needs_critical_regions(spec, sha256):
+                    critical_sha256 = digests.member_regions(
+                        candidate.archive, name,
+                        spec["critical_regions"]["regions"],
+                    )
+                reason = check_file_spec(
+                    spec, size, sha256, critical_sha256,
+                    read_header(candidate, name), abi, name
+                )
+                if reason:
+                    rejected.append("%s rejected: %s" % (name, reason))
+                    continue
+                if critical_sha256 is not None:
+                    logger.log(
+                        "accepted %s by critical regions (sha256=%s)"
+                        % (name, sha256)
+                    )
+                chosen.append(Item(rule["id"], template(rule["destination"], abi),
+                                   candidate, name, size, crc, sha256))
         return unique_one(rule, chosen, rejected)
 
     if kind == "entry":

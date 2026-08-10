@@ -528,9 +528,27 @@ elif [ "$GL_TIER" = "wrapper" ]; then
     export LIBGL_ES=1
     if [ -n "$GL_WRAP_ES1" ]; then
       ln -sf "$GL_WRAP_ES1" "$GL_SHIM/libGLESv1_CM.so.1"
-      ln -sf "$GL_WRAP_ES1" "$GL_SHIM/libmali.so.1"
       echo "GL: fixed function from $GL_WRAP_ES1"
-    else
+    fi
+    # "libmali.so.1" is a name other things resolve too, not just our loader:
+    # ROCKNIX's mali-hook dlopens it expecting the real blob and pulls the gbm
+    # entry points from it. The shim directory is first on the library path,
+    # so aliasing the ES1 wrapper under that soname shadowed the blob and
+    # killed the whole stack with "undefined symbol:
+    # gbm_surface_create_with_modifiers" (RG DS on ROCKNIX). Alias the
+    # firmware's own blob when it has one; the ES1 wrapper only answers the
+    # name where nothing else does.
+    _mali_real=""
+    for _gldir in $GL_DIRS; do
+      [ -e "$_gldir/libmali.so.1" ] && { _mali_real="$_gldir/libmali.so.1"; break; }
+    done
+    if [ -n "$_mali_real" ]; then
+      ln -sf "$_mali_real" "$GL_SHIM/libmali.so.1"
+      echo "GL: libmali.so.1 aliased to the firmware's own blob $_mali_real"
+    elif [ -n "$GL_WRAP_ES1" ]; then
+      ln -sf "$GL_WRAP_ES1" "$GL_SHIM/libmali.so.1"
+    fi
+    if [ -z "$GL_WRAP_ES1" ]; then
       echo "GL: no fixed-function library beside the wrapper set; GLES 1.1 will be resolved through the driver's GetProcAddress"
     fi
     GL_READY="y"
