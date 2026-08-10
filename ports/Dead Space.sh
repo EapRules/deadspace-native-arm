@@ -126,7 +126,16 @@ fi
 
 export LD_LIBRARY_PATH="$GAMEDIR/libs.armhf${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
-export DEADSPACE_FACE_LAYOUT="${DEADSPACE_FACE_LAYOUT:-nintendo}"
+# muOS curates its SDL controller mappings so the logical buttons already
+# match the printed labels; the Nintendo-style swap that is right on the
+# ArkOS family double-swaps there (RG 40XX-H report - the "ABXY feels like
+# Xbox layout" symptom). The default follows the CFW; the variable still
+# overrides either way.
+case "$(echo "${CFW_NAME:-}" | tr 'A-Z' 'a-z')" in
+  muos) _face_default=xbox ;;
+  *)    _face_default=nintendo ;;
+esac
+export DEADSPACE_FACE_LAYOUT="${DEADSPACE_FACE_LAYOUT:-$_face_default}"
 # Aspect-correct scaling for panels that are not the tested 640x480 (e.g. the
 # R36H Pro Max's 1024x768, where the engine's fixed viewport otherwise lands in
 # the bottom-left corner): fit (default) keeps the aspect and letterboxes,
@@ -432,8 +441,36 @@ gl_provider_loadable() {
 # that, whether SDL is asked for the "mali" video backend.
 GL_TIER=""
 
+# Tier 0 - a live Wayland compositor owns the display.
+#
+# Under a compositor (ROCKNIX runs sway), a vendor blob's EGL cannot join the
+# session: it wants the KMS plane the compositor already holds, and dies in
+# eglInitialize with EGL_NOT_INITIALIZED after a perfectly clean preflight -
+# dlopen and symbol checks cannot see whose display it is (RG-DS report). The
+# only EGL that can join a Wayland session is Mesa's, and the firmware that
+# runs a compositor ships exactly that (with its 32-bit DRI drivers named by
+# the CFW's own LIBGL_DRIVERS_PATH). So: if there is a Wayland socket and a
+# Mesa EGL anywhere we search, that pairing outranks every blob tier.
+_wayland_socket=""
+for _ws in "${XDG_RUNTIME_DIR:-/run/user/0}"/wayland-*; do
+  case "$_ws" in *\**) ;; *) [ -e "$_ws" ] && { _wayland_socket="$_ws"; break; } ;; esac
+done
+if [ -n "$_wayland_socket" ]; then
+  for _gldir in $GL_DIRS; do
+    [ -e "$_gldir/libEGL_mesa.so.0" ] || continue
+    [ -e "$_gldir/libEGL.so.1" ] || continue
+    gl_provider_loadable "$_gldir/libEGL.so.1" || continue
+    GL_TIER="mesa"
+    GL_MESA_DIR="$_gldir"
+    echo "GL: Wayland session ($_wayland_socket) + Mesa EGL in $_gldir; blob tiers skipped"
+    break
+  done
+fi
+
 MALI_BLOB=""
 gl_try_blob() {
+  # A tier already chosen (the Wayland/Mesa rule) is never overridden.
+  [ -n "$GL_TIER" ] && return 1
   [ -e "$1" ] || return 1
   gl_provider_loadable "$1" || return 1
   MALI_BLOB="$1"
@@ -567,7 +604,17 @@ else
   # under its own name. libEGL is the one SDL cannot start without.
   GL_EGL=""
   mkdir -p "$GL_SHIM" 2>/dev/null
+  # Tier 0 chose a specific Mesa directory; honour it rather than rescanning,
+  # or the first loadable libEGL in the search order - which can be the very
+  # vendor wrapper the Wayland rule just rejected - wins the shim back.
+  if [ -n "${GL_MESA_DIR:-}" ]; then
+    for _soname in libEGL.so.1 libGLESv1_CM.so.1 libGLESv2.so.2; do
+      [ -e "$GL_MESA_DIR/$_soname" ] && ln -sf "$GL_MESA_DIR/$_soname" "$GL_SHIM/$_soname"
+    done
+    [ -e "$GL_SHIM/libEGL.so.1" ] && GL_EGL="$GL_MESA_DIR/libEGL.so.1"
+  fi
   for _gldir in $GL_DIRS; do
+    [ -n "$GL_EGL" ] && break
     # libEGL is what SDL cannot start without, so one directory must provide
     # it and the GLES libraries are taken from that same directory - a set
     # assembled from two userlands would not be one working stack.
