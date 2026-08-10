@@ -69,7 +69,12 @@ echo "Dead Space port v${PORT_VERSION:-unknown} launcher starting"
 #
 # GL_DIRS is defined here rather than beside the provider search below because
 # the survey lists them; the search is what explains them.
-GL_DIRS="/usr/lib/arm-linux-gnueabihf /usr/lib/arm-linux-gnueabihf/mali \
+# /usr/local/lib first: on the ArkOS builds that carry their working 32-bit
+# GL set there (reported by R36S users; credit to Bheathy on Reddit for
+# finding the path), the sets under /usr/lib/arm-linux-gnueabihf exist but do
+# not load, so the search order is what makes the difference.
+GL_DIRS="/usr/local/lib/arm-linux-gnueabihf /usr/lib/arm-linux-gnueabihf \
+/usr/lib/arm-linux-gnueabihf/mali \
 /lib/arm-linux-gnueabihf /usr/lib32/mali /usr/lib32"
 if [ "$DEVICE_ARCH" = "armhf" ]; then
   GL_DIRS="$GL_DIRS /usr/lib /lib"
