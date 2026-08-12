@@ -406,6 +406,63 @@ GL_FIRST_REASON=""
 # provide fixed function (glMatrixMode, the same probe thunks/khronos/gles1.cpp
 # uses to adopt a provider). A library rejected for one symbol may be the right
 # answer for another, so the rejection cache is keyed by both.
+# Mesa's driver is loaded by glvnd, and this port can hide it from itself.
+#
+# glvnd dlopens the driver named in /usr/share/glvnd/egl_vendor.d/*.json by
+# bare soname, so that dlopen walks LD_LIBRARY_PATH - where this port puts its
+# own bundled libraries first. Those are built against an old glibc on purpose,
+# and a firmware whose Mesa is newer needs symbols they do not carry: on a
+# ROCKNIX RG DS, libgallium asked for GLIBCXX_3.4.29 and the bundled libstdc++
+# stops at 3.4.28. glvnd discards a vendor whose dlopen fails WITHOUT LOGGING
+# IT, so the whole thing surfaces three layers up as eglGetDisplay ->
+# EGL_NO_DISPLAY with EGL_BAD_PARAMETER - which reads like a broken EGL and is
+# really this port's own search path.
+#
+# Decided by capability, never by name: try the driver as things stand, and
+# only if it fails let the firmware's own copies of the shadowed libraries win
+# (the shim directory is already ahead of libs.armhf), then try again. If that
+# does not help either, put everything back - a firmware whose libraries are
+# OLDER than the bundled set must not be handed them.
+gl_mesa_vendor_loads() {
+  # No symbol argument: this asks the one question that matters, whether the
+  # driver dlopens at all, without assuming which entry points a vendor
+  # library exports.
+  LD_LIBRARY_PATH="$GL_SHIM:$LD_LIBRARY_PATH" \
+    "$GAMEDIR/deadspace" --gl-probe "$GL_MESA_DIR/libEGL_mesa.so.0" >/dev/null 2>&1
+}
+
+gl_mesa_unshadow() {
+  [ -n "${GL_MESA_DIR:-}" ] || return 0
+  [ -e "$GL_MESA_DIR/libEGL_mesa.so.0" ] || return 0
+  gl_mesa_vendor_loads && return 0
+
+  echo "GL: the Mesa driver does not load with the bundled libraries in front"
+  "$GAMEDIR/deadspace" --gl-probe-deps "$GL_MESA_DIR/libEGL_mesa.so.0" 2>&1 | sed 's/^/GL:   /'
+
+  _unshadowed=""
+  for _lib in "$GAMEDIR"/libs.armhf/*.so*; do
+    [ -e "$_lib" ] || continue
+    _base=$(basename "$_lib")
+    [ -e "$GL_MESA_DIR/$_base" ] || continue
+    ln -sf "$GL_MESA_DIR/$_base" "$GL_SHIM/$_base" 2>/dev/null &&
+      _unshadowed="$_unshadowed $_base"
+  done
+
+  if [ -z "$_unshadowed" ]; then
+    echo "GL: the firmware carries no replacement for them; the set stays as it is"
+    return 1
+  fi
+  if gl_mesa_vendor_loads; then
+    echo "GL: using the firmware's own$_unshadowed so the Mesa driver can load"
+    return 0
+  fi
+  for _base in $_unshadowed; do
+    rm -f "$GL_SHIM/$_base"
+  done
+  echo "GL: the firmware's copies do not help either; bundled libraries kept"
+  return 1
+}
+
 gl_provider_loadable() {
   local _out _rc _sym
   _sym="${2:-eglGetDisplay}"
@@ -630,6 +687,7 @@ else
     GL_TIER="mesa"
     GL_PROVIDER="$GL_EGL"
     echo "GL: no Mali blob; using the device's 32-bit EGL/GLES set ($GL_EGL)"
+    gl_mesa_unshadow
   fi
 fi
 
