@@ -214,6 +214,20 @@ SHA256 d0ba9983a13a1cf7dbd7a7c5c26d57d544cd9e435ffe80308a03799ea20390de
 size   7215740 bytes
 ```
 
+## ROCKNIX
+
+Set the device's GPU driver to **libmali** (ROCKNIX's own setting; `gpudriver`
+reports the current one). The port has been confirmed running that way on an
+RG DS.
+
+In **panfrost** mode it now reaches a live GL context — earlier releases could
+not, because the port's bundled libraries shadowed what Mesa's driver needed
+and glvnd then loaded no driver at all — but it renders black and crashes
+shortly after. That is a fixed-function GLES 1.1 path on Mesa/Panfrost, which
+is a different problem from this port's; the crash lands on an address that is
+really the value of `GL_NEAREST`, so somewhere a call goes through what the
+engine stored as an enum. Recorded here in case anyone wants to pick it up.
+
 ## Interactive local emulator
 
 `emulator/run.sh` keeps the qemu-arm + Mesa build alive and exposes cursor,
